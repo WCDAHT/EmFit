@@ -1,0 +1,22 @@
+[package]
+name = "app-name-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Config system (service::config): TOML on disk, resolved under the OS config
+# dir for the hardcoded company/product (see `app.rs`).
+toml = { workspace = true }
+directories = { workspace = true }
+# Logging system (service::logging): file subscriber + daily rotation.
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+chrono = { workspace = true }
+
+[lints]
+workspace = true

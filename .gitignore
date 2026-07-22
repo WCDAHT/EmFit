@@ -1,5 +1,47 @@
-/Ghidra_Findings
-/target
-Cargo.lock
-todo
-/.claude
+# --- editor / IDE ---
+.vs/
+.vscode/
+.idea/
+.claude/
+
+# --- OS junk ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# --- Rust ---
+target/
+**/*.rs.bk
+rustc-ice-*.txt
+Cargo.lock.bak
+
+# --- Node / frontend build ---
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# --- Tauri (generated capability schemas + platform projects) ---
+src-tauri/gen/
+
+# --- App runtime artifacts ---
+/logs/
+
+# --- Secrets (never commit) ---
+.env
+.env.*
+*.pem
+*.key
+id_rsa
+id_rsa.*
+*.p12
+*.pfx
+secrets.toml
+*.local.toml
+
+
+frontend/src/assets/generated-licenses.txt

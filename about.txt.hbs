@@ -1,0 +1,11 @@
+--- RUST DEPENDENCIES ---
+{{#each licenses}}
+License: {{name}}
+Used by:
+{{#each used_by}}
+ - {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{text}}
+--------------------------------------------------------------------------------
+{{/each}}

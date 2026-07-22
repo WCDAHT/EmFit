@@ -1,0 +1,183 @@
+/* Brunch design tokens. See STANDARDS §2.
+ *
+ * Single source of truth for color, spacing, and typography across the app
+ * and every app spawned from this template. The token names and semantic
+ * roles are the contract; values may be retuned per app, but the names should
+ * not be renamed.
+ *
+ * This file is the CSS-custom-property successor to the old theme.slint
+ * global. The token names are intentionally preserved 1:1 (just kebab-cased
+ * and prefixed `--`) so the design contract survives the Slint→Tauri move.
+ *
+ * Two palettes ship: dark (default; the `:root` values below) and light
+ * (paper-white, tuned for projector legibility in court/lab use; the
+ * `[data-theme="light"]` overrides). theme.ts flips the `data-theme`
+ * attribute on <html>. Brand identity (accent, selection, status, category
+ * palette) stays constant across modes, so it lives only in `:root`. */
+
+:root {
+  /* ---------------------------------------------------------------
+   * SURFACES (background depth). Dark = warm grey-green (GitHub-dimmed
+   * lineage); avoids pure black to prevent halation during long sessions.
+   * --------------------------------------------------------------- */
+  --surface: #1b1f23; /* window background */
+  --surface-raised: #252b31; /* panels, inputs, menus */
+  --surface-sunken: #15181b; /* wells, code blocks, recessed */
+  --surface-hover: #2c3138; /* row / menu hover */
+  --overlay: rgba(0, 0, 0, 0.5); /* modal backdrop scrim; constant across modes */
+
+  /* ---------------------------------------------------------------
+   * BORDERS (dividers and outlines).
+   * --------------------------------------------------------------- */
+  --border: #2f363d;
+  --border-strong: #444c56;
+  --border-subtle: #21262d;
+
+  /* ---------------------------------------------------------------
+   * TEXT (foreground).
+   * --------------------------------------------------------------- */
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  /* --text-muted matches dark-mode value in both palettes (~4.6:1 on white
+   * clears WCAG AA; the old 2.9:1 light value was unreadable on projectors). */
+  --text-muted: #6e7681;
+  /* Dark text on orange: white on #ff8c42 is 2.6:1 and fails WCAG AA; dark is
+   * ~5.1:1 and reads clearly. Applies to button labels and sent-bubble text. */
+  --text-on-accent: #1f2328;
+  --text-on-card: var(--text-primary); /* received-bubble text on surface-raised */
+
+  /* ---------------------------------------------------------------
+   * ACCENT (Brunch brand orange, constant across modes). Spawned apps
+   * inherit it; override only for a deliberate different identity (and then
+   * update the About panel copy too).
+   * --------------------------------------------------------------- */
+  --accent: #ff8c42; /* primary action, brand */
+  --accent-hover: #ffa066;
+  --accent-pressed: #e57536;
+  --accent-muted: #7a4220; /* disabled / subtle */
+
+  /* ---------------------------------------------------------------
+   * SELECTION (distinct from accent; Windows 11 SystemAccentColor). The user
+   * choosing a thing (selection blue) vs being shown a branded affordance
+   * (orange). Don't unify them.
+   * --------------------------------------------------------------- */
+  --selection: #0078d4;
+  --selection-soft: #1a3a5c; /* selection background tint */
+
+  /* ---------------------------------------------------------------
+   * SEMANTIC STATUS (constant across modes; GitHub Primer palette).
+   * --------------------------------------------------------------- */
+  --positive: #3fb950;
+  --warning: #d29922;
+  --danger: #f85149;
+  --info: #58a6ff;
+
+  /* ---------------------------------------------------------------
+   * BUBBLE PAIR (chat-style apps like Message-Maestro).
+   * --------------------------------------------------------------- */
+  --bubble-sent: var(--accent);
+  --bubble-received: var(--surface-raised);
+
+  /* ---------------------------------------------------------------
+   * HIGHLIGHTS (search match and similar transient emphasis). Distinct hue
+   * from --warning so a found-term highlight reads apart from a warning badge.
+   * --------------------------------------------------------------- */
+  --search-highlight: #bf8700; /* amber, darker than warning */
+  --search-bg: #3d3d00;
+
+  /* ---------------------------------------------------------------
+   * TYPOGRAPHY. See §2.4. Inter is bundled via @font-face in global.css.
+   * --------------------------------------------------------------- */
+  --font-family: "Inter", system-ui, sans-serif;
+  --font-family-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  --font-size-caption: 11px; /* timestamps, line numbers */
+  --font-size-body: 13px; /* default */
+  --font-size-body-lg: 15px; /* emphasized body */
+  --font-size-heading: 18px; /* section titles (semibold) */
+  --font-size-title: 24px; /* dialog/window titles */
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+
+  /* ---------------------------------------------------------------
+   * SPACING (4pt scale).
+   * --------------------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ---------------------------------------------------------------
+   * CORNER RADIUS.
+   * --------------------------------------------------------------- */
+  --radius-small: 3px;
+  --radius-medium: 6px;
+  --radius-large: 10px;
+
+  /* ---------------------------------------------------------------
+   * COMPONENT SIZING.
+   * --------------------------------------------------------------- */
+  --input-height: 32px;
+  --button-height: 32px;
+  --row-height: 36px;
+
+  /* ---------------------------------------------------------------
+   * MOTION (durations + easing; §2.7). Used by CSS transitions; the matching
+   * numeric values for Svelte JS transitions live in lib/motion.ts and must
+   * stay in lockstep with these (the CSS/JS boundary can't share a var()).
+   * Keep motion subtle and fast — chrome should feel responsive, not
+   * animated. All motion is gated on prefers-reduced-motion at call sites.
+   * --------------------------------------------------------------- */
+  --duration-fast: 140ms; /* hover / state changes */
+  --duration-base: 240ms; /* enter transitions, content swaps */
+  --duration-tick: 120ms; /* progress-bar fill smoothing (with --ease-linear) */
+  --duration-loop: 1100ms; /* indeterminate progress sweep; continuous, deliberate */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* decelerate; for entrances */
+  --ease-linear: linear; /* constant-rate motion: progress fills, sweeps */
+  --ease-in-out: ease-in-out; /* symmetric ease for looping animations */
+  --stagger-step: 40ms; /* per-item delay in list cascades */
+
+  /* ---------------------------------------------------------------
+   * CATEGORY PALETTE (tags, card colors, chart series; §2.3). Eight tokens
+   * ordered so adjacent categories are maximally distinguishable; cat-8 is
+   * the brand orange so it only appears in 6+ series charts.
+   * --------------------------------------------------------------- */
+  --category-1: #1f6feb; /* blue */
+  --category-2: #3fb950; /* green */
+  --category-3: #a371f7; /* purple */
+  --category-4: #f85149; /* red */
+  --category-5: #39c5cf; /* teal */
+  --category-6: #e3b341; /* yellow (true yellow, not warning amber) */
+  --category-7: #db61a2; /* magenta */
+  --category-8: #ff8c42; /* orange (brand accent; only in 6+ series charts) */
+}
+
+/* ---------------------------------------------------------------
+ * LIGHT MODE. Crisp paper white with deliberately stronger borders so panel
+ * structure survives projector use under ambient light. Only the tokens that
+ * differ from dark are overridden here; brand/status/category tokens are
+ * inherited from :root unchanged.
+ * --------------------------------------------------------------- */
+[data-theme="light"] {
+  --surface: #ffffff;
+  --surface-raised: #f6f8fa;
+  --surface-sunken: #eaecef;
+  --surface-hover: #f0f3f6;
+
+  --border: #afb8c1; /* ~1.9:1 on white; structure stays visible on projectors */
+  --border-strong: #6e7681;
+  --border-subtle: #d0d7de;
+
+  --text-primary: #1f2328;
+  --text-secondary: #57606a;
+  /* --text-muted and --text-on-accent intentionally unchanged from :root. */
+
+  --accent-hover: #ff7a25;
+  --accent-pressed: #e56a15;
+  --accent-muted: #ffd7b8;
+
+  --selection-soft: #cce4f7;
+  --search-bg: #fff8c5;
+}

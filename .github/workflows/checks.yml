@@ -1,0 +1,82 @@
+name: Checks
+
+# Lightweight gate on every push to main: formatting, lints, tests, type-check,
+# and version-sync — without the heavy release build (that lives in release.yml).
+# Runs on self-hosted runners (macOS commented out for now).
+on:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Self-hosted runners. Register each runner with the matching custom
+        # label (in addition to the auto-applied `self-hosted`):
+        #   Ubuntu  -> label "self-linux"
+        #   Windows -> label "self-windows"
+        include:
+          - { label: linux-x86_64, runner: [self-hosted, self-linux] }
+          - { label: windows-x64, runner: [self-hosted, self-windows] }
+#          - { label: macos-arm64, runner: [self-hosted, self-macos] }
+
+    runs-on: ${{ matrix.runner }}
+    name: ${{ matrix.label }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Self-hosted, persistent machine: keep target/, node_modules/, and the
+          # cargo caches on disk between runs (incremental builds) instead of
+          # uploading/downloading them through the GitHub cache service, which was
+          # the slow part. checkout still resets tracked files to the commit.
+          clean: false
+
+      # On Windows, Git's default install puts only `cmd` on PATH (not `bin`),
+      # so `bash` resolves to WSL's System32\bash.exe. That breaks bash-using
+      # actions like dtolnay/rust-toolchain (it crashed in "parse toolchain
+      # version"). Prepend Git's bin so `bash` is Git Bash for every later step.
+      - name: Prefer Git Bash on PATH (Windows)
+        if: contains(matrix.label, 'windows')
+        shell: cmd
+        run: echo C:\Program Files\Git\bin>>%GITHUB_PATH%
+
+      - name: Install Linux system dependencies
+        if: contains(matrix.label, 'linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Version files in sync
+        run: npm run version:check
+
+      - name: Rust format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Type-check frontend
+        run: npm run check

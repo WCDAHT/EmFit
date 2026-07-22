@@ -1,0 +1,71 @@
+/* Global base styles. Imported once from src/main.ts before the app mounts.
+ * Pulls in the design tokens, self-hosts the Inter font, and registers the
+ * Bootstrap Icons webfont. See STANDARDS §2. */
+
+@import "./theme.css";
+
+/* Bootstrap Icons (MIT). The npm package ships both the webfont (used via the
+ * `bi bi-<name>` classes in Icon.svelte) and the raw SVGs (for Svelte Flow
+ * custom nodes or anywhere you need to recolor/animate a glyph). Only this
+ * one webfont file is bundled; individual SVG imports are tree-shaken.
+ * License text is surfaced in the About panel. See STANDARDS §2.5, §5.6. */
+@import "bootstrap-icons/font/bootstrap-icons.css";
+
+/* Bundle one font, self-hosted (STANDARDS §2.4). The .otf bytes are emitted
+ * into dist/ by Vite and shipped inside the app — no system font dependency,
+ * no runtime/CDN fetch. font-display: block avoids a fallback-font flash on
+ * the first frame. */
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-SemiBold.otf") format("opentype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
+  /* Desktop chrome: no rubber-band scroll, no text selection on chrome
+   * (re-enable selection explicitly on content that should be copyable). */
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app {
+  height: 100%;
+}
+
+/* Brand the native text-selection highlight to match the selection token. */
+::selection {
+  background: var(--selection-soft);
+}
+
+/* Themed scrollbars so std scroll areas read as Brunch, not raw OS chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}

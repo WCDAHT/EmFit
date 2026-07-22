@@ -1,0 +1,34 @@
+[package]
+name = "app-name"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Tauri 2 splits the crate into a library (mobile-shareable, holds `run()`)
+# and a thin binary that calls it. Keep both even on a desktop-only app:
+# `tauri android`/`tauri ios` need the cdylib/staticlib targets, and adding
+# them later is more churn than carrying them now. See STANDARDS §3.
+[lib]
+name = "app_name_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "app-name"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+app-name-core = { path = "../app-name-core" }
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+tauri-plugin-opener = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+directories = { workspace = true }
+
+[lints]
+workspace = true

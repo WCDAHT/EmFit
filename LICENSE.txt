@@ -1,0 +1,75 @@
+Copyright 2026 Steven R. Schiavone (steven.schiavone@gmail.com).
+All rights reserved.
+
+This software and its source code are proprietary and confidential.
+No license is granted by default to use, copy, modify, merge, publish,
+distribute, sublicense, or sell copies of the software, except as set
+out below or as separately authorized in writing by the copyright holder.
+
+INTERNAL USE GRANT
+
+The copyright holder grants the following named entities a non-exclusive,
+non-transferable, royalty-free license to use, modify, and run the
+software internally for the purposes described:
+
+  1. Iceberg Forensics LLC (or its successor entity, once formed):
+     for the development, maintenance, and internal operation of
+     forensic tooling on behalf of the entity's principals.
+
+  2. Westchester County District Attorney's Office, High Tech Crime
+     Bureau (WCDA HTCB): for the development, maintenance, and
+     internal operation of forensic tooling used in the lawful
+     conduct of the Bureau's investigative work.
+
+This grant does not include the right to:
+
+  - redistribute the software, in source or binary form, outside
+    the named entity;
+  - sublicense the software to a third party;
+  - include the software (in whole or in part) in any deliverable
+    handed to a client, suspect, defendant, court, or other external
+    party, except as compiled output viewed by that party during the
+    course of a normal forensic engagement;
+  - represent the software as the entity's own work product when
+    distributed.
+
+Each entity's grant is independent. Loss or termination of one
+entity's rights does not affect the other's.
+
+THIRD-PARTY COMPONENTS
+
+This software bundles third-party components under their respective
+upstream licenses, which travel with every binary:
+
+  - Inter font: SIL Open Font License 1.1.
+    See app-name-ui/assets/Inter-OFL.txt.
+
+  - Bootstrap Icons: MIT License.
+    See app-name-ui/assets/icons/LICENSE.txt.
+
+  - Slint UI toolkit: Royalty-Free license terms.
+    Visible attribution is provided in the application's About panel.
+    Terms: https://slint.dev/terms-and-conditions.html.
+
+The above third-party obligations are independent of this license
+and must be honored when distributing any binary built from this
+source.
+
+NO WARRANTY
+
+The software is provided "as is", without warranty of any kind,
+express or implied, including but not limited to the warranties of
+merchantability, fitness for a particular purpose, and noninfringement.
+In no event shall the copyright holder be liable for any claim,
+damages, or other liability, whether in an action of contract, tort,
+or otherwise, arising from, out of, or in connection with the
+software or the use or other dealings in the software.
+
+COMMERCIAL USE BY THE COPYRIGHT HOLDER
+
+The copyright holder retains all rights not expressly granted above,
+including the right to use, license, relicense, distribute, sell,
+or open-source the software on any terms, at any time, including
+through Iceberg Forensics LLC as the copyright holder's commercial
+vehicle. This license does not constrain the copyright holder's own
+use of the software.

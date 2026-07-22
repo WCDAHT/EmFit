@@ -1,0 +1,33 @@
+{
+  "name": "app-name",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "gen-license": "node scripts/generate-credits.js",
+    "dev": "cd frontend && vite",
+    "build": "npm run gen-license && cd frontend && svelte-check --tsconfig ./tsconfig.json && vite build",
+    "preview": "cd frontend && vite preview",
+    "check": "cd frontend && svelte-check --tsconfig ./tsconfig.json",
+    "test": "cd frontend && vitest run",
+    "version:check": "node scripts/version.js check",
+    "version:sync": "node scripts/version.js sync",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "bootstrap-icons": "^1.11"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "@tauri-apps/cli": "^2",
+    "@tsconfig/svelte": "^5",
+    "@types/node": "^24",
+    "svelte": "^5",
+    "svelte-check": "^4",
+    "typescript": "^5",
+    "vite": "^6"
+  }
+}

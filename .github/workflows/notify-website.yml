@@ -1,0 +1,35 @@
+name: Notify website on release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repo_override:
+        description: 'Repo name to send in payload (defaults to this repo)'
+        required: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: WCDAHT
+
+      - name: Trigger website update
+        run: |
+          REPO="${{ github.event.inputs.repo_override }}"
+          if [ -z "$REPO" ]; then
+            REPO="${{ github.event.repository.name }}"
+          fi
+          curl -s \
+            -H "Authorization: Bearer ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            -X POST \
+            -d "{\"event_type\": \"new_release\", \"client_payload\": {\"repo\": \"$REPO\"}}" \
+            https://api.github.com/repos/WCDAHT/WCDAHT.github.io/dispatches
