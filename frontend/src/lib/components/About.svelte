@@ -1,14 +1,14 @@
 <!--
-  About.svelte — about/licenses dialog.
+  About.svelte â€” about/licenses dialog.
 
   Unlike the Slint template (which embedded license text in the Rust binary
   via include_str! and pushed it through a bridge), the About panel is pure
   frontend now. The license files are imported as raw strings at build time
   with Vite's `?raw` suffix, so they ship inside the webview bundle and
   satisfy the "must contain this license" obligations (SIL OFL, MIT). No Rust
-  command is involved. See STANDARDS §5.6.
+  command is involved. See STANDARDS Â§5.6.
 
-  Tauri (MIT/Apache-2.0) imposes NO attribution requirement — there is no
+  Tauri (MIT/Apache-2.0) imposes NO attribution requirement â€” there is no
   "Made with Slint"-style badge to carry anymore. This panel exists for the
   bundled font and icon licenses plus the app's own proprietary notice.
 -->
@@ -26,7 +26,7 @@
   let { open, onClose }: Props = $props();
 
   const licenses = [
-    { name: "app-name (this software)", body: appLicense },
+    { name: "EmFit (this software)", body: appLicense },
     { name: "Inter font (SIL OFL 1.1)", body: interLicense },
     { name: "Third Party", body: thirdPartyLicenses },
   ];
@@ -49,9 +49,9 @@
       if (e.target === e.currentTarget) onClose();
     }}
   >
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="About app-name">
+    <div class="dialog" role="dialog" aria-modal="true" aria-label="About EmFit">
       <header>
-        <h2>About app-name</h2>
+        <h2>About EmFit</h2>
         <button class="close" onclick={onClose} aria-label="Close">&times;</button>
       </header>
 

@@ -1,14 +1,14 @@
 //! `#[tauri::command]` functions: the webview's only entry into Rust.
 //!
 //! These are the Tauri analogue of the old Slint callback wiring. Per
-//! STANDARDS §3.4 they stay *thin*: parse/validate arguments, call into
-//! `app-name-core`, map the result to a `Serialize` type or `CommandError`.
-//! No business logic lives here — if a command grows past a few lines of
+//! STANDARDS Â§3.4 they stay *thin*: parse/validate arguments, call into
+//! `emfit-core`, map the result to a `Serialize` type or `CommandError`.
+//! No business logic lives here â€” if a command grows past a few lines of
 //! glue, the logic belongs in a core `service`.
 //!
 //! Every command added here must be listed in `tauri::generate_handler![...]`
-//! in `lib.rs` — that alone makes it invokable. App commands need NO capability
-//! entry; `capabilities/default.json` (§3.6) gates only plugin/core commands.
+//! in `lib.rs` â€” that alone makes it invokable. App commands need NO capability
+//! entry; `capabilities/default.json` (Â§3.6) gates only plugin/core commands.
 //!
 //! A typed wrapper for each command lives on the frontend in
 //! `src/lib/ipc.ts`, so the rest of the Svelte code never touches the raw
@@ -16,12 +16,12 @@
 
 use std::sync::Mutex;
 
-use app_name_core::service::config::Config;
+use emfit_core::service::config::Config;
 use tauri::State;
 
 use crate::error::CommandResult;
 
-/// Canonical "hello world" command demonstrating the shell↔core bridge.
+/// Canonical "hello world" command demonstrating the shellâ†”core bridge.
 ///
 /// Replace with real commands as the app grows. The shape to copy:
 /// take serde-deserializable args, return a `CommandResult<T>` where `T:
@@ -29,7 +29,7 @@ use crate::error::CommandResult;
 #[tauri::command]
 pub fn greet(name: &str) -> CommandResult<String> {
     tracing::info!(name, "greet called");
-    Ok(format!("Hello, {name}! The shell↔core bridge works."))
+    Ok(format!("Hello, {name}! The shellâ†”core bridge works."))
 }
 
 /// Emit a log line that originated in the webview into the Rust `tracing`
@@ -53,7 +53,7 @@ pub fn log_event(level: String, message: String) {
 }
 
 /// Read the current application config. The shell holds the loaded `Config` in
-/// managed state (the Rust side owns truth, STANDARDS §3.3); this hands the
+/// managed state (the Rust side owns truth, STANDARDS Â§3.3); this hands the
 /// webview a snapshot to project into the UI.
 #[tauri::command]
 pub fn get_config(config: State<'_, Mutex<Config>>) -> Config {
@@ -63,7 +63,7 @@ pub fn get_config(config: State<'_, Mutex<Config>>) -> Config {
 }
 
 /// Replace the application config and persist it to disk. The webview loads the
-/// config, mutates a setting, and sends the whole value back — so adding a new
+/// config, mutates a setting, and sends the whole value back â€” so adding a new
 /// setting needs no new command, just a new field on `Config`. The full value
 /// round-trips (including `schema_version`) so the frontend never has to
 /// understand fields it doesn't use.

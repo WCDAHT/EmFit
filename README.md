@@ -1,8 +1,9 @@
-# app-name
+# EmFit
 
-> **Using this as a template?** Jump to [Bootstrap](#bootstrap).
-
-One paragraph describing what this app does, in plain English. No marketing.
+Fast local file search and disk-space analysis. EmFit reads NTFS volume metadata
+directly instead of walking directories, so indexing a whole drive takes seconds:
+type to find any file by name, or view what is actually consuming the disk.
+A reimplementation of the ground covered by WizTree and Everything.
 
 ## Screenshot
 
@@ -31,16 +32,14 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+O` | Open |
-| `Ctrl+S` | Save |
-| `Ctrl+F` | Find |
+| `Ctrl+F` | Focus search |
+| `F5`     | Rescan volume |
 | `F1`     | Help |
 | `Esc`    | Cancel / close |
-| `Delete` | Remove selection |
 
 ## Architecture
 
-A Cargo workspace of two Rust crates plus a Svelte frontend. `app-name-core` holds
+A Cargo workspace of two Rust crates plus a Svelte frontend. `emfit-core` holds
 all logic and depends on no UI or Tauri code. `src-tauri` is a thin Tauri shell that
 wires `#[tauri::command]`s to the core. `frontend/` is the Svelte 5 + TypeScript app,
 which talks to the shell only through typed IPC. `Cargo.toml` and `package.json` stay
@@ -48,10 +47,10 @@ at the root (the CLIs resolve their code dirs from there); everything else is gr
 under the three code peers.
 
 ```
-app-name/
+EmFit/
 ├── Cargo.toml            # Rust workspace
 ├── package.json          # frontend deps + scripts (dev → vite frontend)
-├── app-name-core/        # logic; testable headless
+├── emfit-core/           # logic; testable headless
 │   ├── src/{model,parser,service,error.rs,lib.rs}
 │   └── tests/fixtures/   # real input samples for parser tests
 ├── src-tauri/            # Tauri shell (Rust)
@@ -71,6 +70,9 @@ app-name/
 ├── analysis_todo.md
 └── STANDARDS.md          # this workspace's standards
 ```
+
+Naming: the crates, package, and paths use lower-case `emfit`; the product name
+shown to users — window title, executable, About panel — is `EmFit`.
 
 ## Build
 
@@ -92,76 +94,6 @@ Bundled third-party components ship under their respective upstream licenses:
 Inter font (SIL Open Font License 1.1), Bootstrap Icons (MIT), and the Tauri /
 Svelte / Vite toolchain (MIT or Apache-2.0). The About panel surfaces the full
 license texts.
-
----
-
-## Bootstrap
-
-Spinning up a new app from this template:
-
-1. **Clone the repo and pick an app name.** Use `kebab-case` (e.g. `chowder`,
-   `evidence-tagger`, `gps-extractor`). The name appears in the crate names, the
-   binary filename, the bundle identifier, and the window title.
-
-2. **Rename `app-name` across the codebase.** Order matters because `app-name` is a
-   substring of `app-name-core`. Do the longer one first. STANDARDS.md and this
-   README are excluded: STANDARDS.md uses `<app-name>` as generic shared guidance;
-   this README's Bootstrap section is deleted manually in step 5.
-
-   ```powershell
-   # PowerShell, run from repo root. Replace `chowder` with your name.
-   $newname  = "chowder"
-   $newname_ = $newname -replace '-','_'   # crate/module form, e.g. evidence_tagger
-   $excludeFiles = @("STANDARDS.md", "README.md", "Cargo.lock", "package-lock.json")
-   $excludeExts  = @(".otf", ".ttf", ".svg", ".png", ".jpg", ".ico", ".icns", ".pdf")
-
-   Get-ChildItem -Recurse -File `
-     | Where-Object {
-         $_.FullName -notmatch '\\\.git\\|\\target\\|\\node_modules\\|\\dist\\|\\gen\\' `
-         -and $excludeFiles -notcontains $_.Name `
-         -and $excludeExts  -notcontains $_.Extension
-       } `
-     | ForEach-Object {
-         $content = Get-Content $_.FullName -Raw
-         if ($null -eq $content) { return }   # empty file, nothing to rewrite
-         $rewritten = $content `
-           -creplace 'app-name-core', "$newname-core" `
-           -creplace 'app_name_core', "${newname_}_core" `
-           -creplace 'app_name_lib',  "${newname_}_lib" `
-           -creplace 'app-name',      $newname `
-           -creplace 'app_name',      $newname_
-         if ($content -ne $rewritten) {
-             [System.IO.File]::WriteAllText($_.FullName, $rewritten)
-         }
-       }
-   ```
-
-   `WriteAllText` preserves each file's existing line endings. Don't use
-   `Set-Content -NoNewline`; it strips trailing newlines and `cargo fmt --check`
-   in CI will reject the result. `-creplace` (not `-replace`) is deliberate:
-   the default is case-insensitive and would clobber the `APP_NAME` env var
-   in `.github/workflows/release.yml`.
-
-3. **Rename the core crate directory** to match (the `src-tauri` directory keeps its
-   conventional name):
-
-   ```powershell
-   Rename-Item app-name-core "$newname-core"
-   ```
-
-4. **Set the bundle identifier and generate icons.** Edit `identifier` in
-   `src-tauri/tauri.conf.json` (reverse-DNS, e.g. `com.brunch.chowder`), then create a
-   square `app-icon.svg` at the repo root and run `npx tauri icon ./app-icon.svg`.
-
-5. **Update this README's `# app-name` heading, intro, features, and shortcut table**
-   with the new app's content. Delete this Bootstrap section.
-
-6. **Verify it builds:** `npm install` then `npm run tauri dev`. The first release
-   build (`npm run tauri build`) takes a while; don't worry about that yet.
-
-7. **Read [STANDARDS.md](./STANDARDS.md)** before your first PR. It covers theme
-   tokens, the core/shell split, the IPC boundary, error handling, the security
-   model, and the anti-patterns to avoid.
 
 ---
 

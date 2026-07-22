@@ -42,14 +42,15 @@ This software bundles third-party components under their respective
 upstream licenses, which travel with every binary:
 
   - Inter font: SIL Open Font License 1.1.
-    See app-name-ui/assets/Inter-OFL.txt.
+    See frontend/src/assets/fonts/Inter-OFL.txt.
 
   - Bootstrap Icons: MIT License.
-    See app-name-ui/assets/icons/LICENSE.txt.
+    See frontend/src/assets/licenses/bootstrap-icons-LICENSE.txt.
 
-  - Slint UI toolkit: Royalty-Free license terms.
-    Visible attribution is provided in the application's About panel.
-    Terms: https://slint.dev/terms-and-conditions.html.
+  - Tauri, Svelte, and Vite toolchains: MIT or Apache-2.0.
+    Full texts are generated into
+    frontend/src/assets/generated-licenses.txt and shown in the
+    application's About panel.
 
 The above third-party obligations are independent of this license
 and must be honored when distributing any binary built from this

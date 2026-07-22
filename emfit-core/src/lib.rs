@@ -1,7 +1,7 @@
 //! Public API for the UI crate.
 //!
-//! Per STANDARDS §1, this crate holds all logic and depends on no UI or
-//! Tauri types. `cargo check -p app-name-core` must succeed with `src-tauri`
+//! Per STANDARDS Â§1, this crate holds all logic and depends on no UI or
+//! Tauri types. `cargo check -p emfit-core` must succeed with `src-tauri`
 //! deleted.
 
 pub mod app;

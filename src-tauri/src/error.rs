@@ -2,9 +2,9 @@
 //!
 //! Command return errors cross the IPC boundary into JavaScript, so they
 //! must be `Serialize`. We keep a thin shell-level enum that wraps the core
-//! crate's `Error` (STANDARDS §4.1) and serializes to its display string —
+//! crate's `Error` (STANDARDS Â§4.1) and serializes to its display string â€”
 //! the webview gets a readable message, the Rust side keeps the typed error
-//! for logging. Do not return `app_name_core::Error` directly from commands;
+//! for logging. Do not return `emfit_core::Error` directly from commands;
 //! it isn't `Serialize` and shouldn't have to be.
 
 use serde::{Serialize, Serializer};
@@ -13,9 +13,9 @@ use serde::{Serialize, Serializer};
 pub enum CommandError {
     /// A failure that originated in the core logic crate.
     #[error(transparent)]
-    Core(#[from] app_name_core::Error),
+    Core(#[from] emfit_core::Error),
 
-    /// A background task (e.g. a `spawn_blocking` worker) failed to join — it
+    /// A background task (e.g. a `spawn_blocking` worker) failed to join â€” it
     /// panicked or the runtime dropped it. Distinct from a domain error
     /// returned *by* the task, which arrives as `Core`.
     #[error("background task failed: {0}")]

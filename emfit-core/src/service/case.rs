@@ -119,7 +119,7 @@ mod tests {
 
     fn tmpdir() -> PathBuf {
         let mut d = std::env::temp_dir();
-        d.push(format!("brunch-case-test-{}", std::process::id()));
+        d.push(format!("emfit-case-test-{}", std::process::id()));
         let _ = fs::create_dir_all(&d);
         d
     }

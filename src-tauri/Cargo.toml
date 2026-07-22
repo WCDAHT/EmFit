@@ -1,5 +1,5 @@
 [package]
-name = "app-name"
+name = "emfit"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -7,20 +7,23 @@ publish.workspace = true
 # Tauri 2 splits the crate into a library (mobile-shareable, holds `run()`)
 # and a thin binary that calls it. Keep both even on a desktop-only app:
 # `tauri android`/`tauri ios` need the cdylib/staticlib targets, and adding
-# them later is more churn than carrying them now. See STANDARDS §3.
+# them later is more churn than carrying them now. See STANDARDS Â§3.
 [lib]
-name = "app_name_lib"
+name = "emfit_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Binary name is the display name (`EmFit`), matching `productName` /
+# `mainBinaryName` in tauri.conf.json so the shipped executable is `EmFit.exe`
+# and no post-build rename is involved. The crate/package name stays kebab-case.
 [[bin]]
-name = "app-name"
+name = "EmFit"
 path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { workspace = true }
 
 [dependencies]
-app-name-core = { path = "../app-name-core" }
+emfit-core = { path = "../emfit-core" }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 tauri-plugin-opener = { workspace = true }

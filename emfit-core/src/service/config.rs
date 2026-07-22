@@ -1,27 +1,27 @@
-//! Application configuration (STANDARDS §4.4).
+//! Application configuration (STANDARDS Â§4.4).
 //!
 //! A single TOML file under the OS config directory holds the user's settings
 //! and any state the app wants to remember between runs (the current theme,
-//! window geometry, recent files, …). It is loaded once at startup and
+//! window geometry, recent files, â€¦). It is loaded once at startup and
 //! rewritten whenever a setting changes.
 //!
-//! Design notes (this module is copied verbatim into new apps — keep it
+//! Design notes (this module is copied verbatim into new apps â€” keep it
 //! project-agnostic):
 //! - **Identity comes from [`crate::app`].** The company/product constants
 //!   there resolve the on-disk path; nothing here is app-specific.
 //! - **Typed, not stringly.** [`Config`] is a plain serde struct. To add a
-//!   setting, add a field with a sensible default — that's the only change
+//!   setting, add a field with a sensible default â€” that's the only change
 //!   needed (load/save are generic). `theme` is the worked example.
 //! - **Schema-versioned.** Every config carries [`SCHEMA_VERSION`] so a future
 //!   format change can migrate instead of guessing.
 //! - **First-run defaults.** A missing file is not an error: [`Config::load`]
 //!   returns defaults. The app never asks the user to create the file.
 //! - **Corruption is recoverable.** A malformed file logs a warning and falls
-//!   back to defaults (STANDARDS §4.5: a bad config can be regenerated). The
+//!   back to defaults (STANDARDS Â§4.5: a bad config can be regenerated). The
 //!   next save overwrites it.
 //!
 //! ```ignore
-//! use app_name_core::service::config::Config;
+//! use emfit_core::service::config::Config;
 //!
 //! let mut cfg = Config::load();          // never fails; defaults on miss
 //! cfg.theme = Some("light".to_string());
@@ -39,7 +39,7 @@ use crate::app;
 use crate::error::{Error, Result};
 
 /// Bump when a breaking change to [`Config`]'s shape lands, and add migration
-/// handling keyed off the loaded value (STANDARDS §4.4).
+/// handling keyed off the loaded value (STANDARDS Â§4.4).
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// File name within the config directory.
@@ -50,7 +50,7 @@ const FILE_NAME: &str = "config.toml";
 /// `#[serde(default)]` makes every field optional on read: an older file
 /// missing a newly-added field loads cleanly (the field takes its default),
 /// which keeps forward/backward compatibility cheap. Add new settings as
-/// fields below — no other code changes are required to persist them.
+/// fields below â€” no other code changes are required to persist them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -59,9 +59,9 @@ pub struct Config {
     pub schema_version: u32,
 
     /// Selected UI theme: `"dark"`, `"light"`, or `None` to follow the OS.
-    /// The worked example of a persisted setting — replace/extend per app.
+    /// The worked example of a persisted setting â€” replace/extend per app.
     pub theme: Option<String>,
-    // --- add further settings here (window geometry, recent files, …) ---
+    // --- add further settings here (window geometry, recent files, â€¦) ---
 }
 
 impl Default for Config {
@@ -180,7 +180,7 @@ mod tests {
 
     fn tmp_path(tag: &str) -> PathBuf {
         let mut d = std::env::temp_dir();
-        d.push(format!("brunch-config-test-{}-{tag}", std::process::id()));
+        d.push(format!("emfit-config-test-{}-{tag}", std::process::id()));
         let _ = fs::create_dir_all(&d);
         d.join("config.toml")
     }

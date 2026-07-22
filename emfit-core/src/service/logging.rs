@@ -1,7 +1,7 @@
-//! Application logging (STANDARDS §4.2).
+//! Application logging (STANDARDS Â§4.2).
 //!
 //! `tracing` everywhere, funnelled into a detailed, plain-text log file under
-//! the OS data directory. This module is copied verbatim into new apps — keep
+//! the OS data directory. This module is copied verbatim into new apps â€” keep
 //! it project-agnostic (identity comes from [`crate::app`], the only per-app
 //! knobs are the two constants below).
 //!
@@ -12,13 +12,13 @@
 //! - **No colour symbols.** ANSI escapes are disabled on the file layer, so
 //!   the log is greppable plain text, not terminal-control gibberish.
 //! - **Timestamped.** Every line is prefixed with a millisecond UTC timestamp
-//!   via [`UtcTimer`] — unambiguous across timezones.
+//!   via [`UtcTimer`] â€” unambiguous across timezones.
 //! - **Very detailed.** Level, target, and source file:line are all recorded,
 //!   and our own crates log at `debug` by default.
 //!
 //! A second, human-friendly layer writes to stdout so `tauri dev` still shows
 //! logs in the terminal. Both layers share one [`EnvFilter`]; `RUST_LOG`
-//! overrides the default (STANDARDS §4.4: env vars for deployment knobs only).
+//! overrides the default (STANDARDS Â§4.4: env vars for deployment knobs only).
 //!
 //! Call [`init`] once, as early as possible in the shell's `run()`. It is
 //! best-effort: if the log directory can't be created it falls back to
@@ -41,7 +41,7 @@ const LOG_DIR_NAME: &str = "logs";
 
 /// Filename stem for the rolling log (the date and `.log` are appended).
 /// Per-app knob: set to your app's short name.
-const LOG_FILE_PREFIX: &str = "app-name";
+const LOG_FILE_PREFIX: &str = "emfit";
 
 /// How many daily log files to keep before the oldest is pruned.
 const MAX_LOG_FILES: usize = 30;
@@ -49,12 +49,11 @@ const MAX_LOG_FILES: usize = 30;
 /// Default verbosity when `RUST_LOG` is unset: `info` for the world, `debug`
 /// for our own crates so the file stays detailed without the dependency
 /// firehose. Per-app knob: list your crates here. The default names are
-/// `app_name_core` (core), `app_name_lib` (the shell library), `app_name`
+/// `emfit_core` (core), `emfit_lib` (the shell library), `emfit`
 /// (the binary). Rename in lockstep when you rename the crates. `frontend` is
 /// the fixed target for webview console lines forwarded through the console
 /// bridge (`src-tauri/src/commands.rs::log_event`); it is not a crate name.
-const DEFAULT_FILTER: &str =
-    "info,app_name_core=debug,app_name_lib=debug,app_name=debug,frontend=debug";
+const DEFAULT_FILTER: &str = "info,emfit_core=debug,emfit_lib=debug,emfit=debug,frontend=debug";
 
 /// The directory log files are written to, seeded by the [`crate::app`]
 /// identity constants. On Windows: `%LOCALAPPDATA%\<COMPANY>\<PRODUCT>\data\logs\`.
@@ -87,7 +86,7 @@ impl FormatTime for UtcTimer {
 /// Returns the resolved log directory on success so the caller can report it.
 /// On failure to set up the file (e.g. unresolvable/uncreatable directory) it
 /// logs a warning to stdout, installs a stdout-only subscriber, and returns the
-/// error — the app keeps running, just without a log file.
+/// error â€” the app keeps running, just without a log file.
 pub fn init() -> Result<PathBuf> {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
@@ -178,7 +177,7 @@ mod tests {
     #[test]
     fn log_dir_is_under_product_data_dir() {
         // The path should resolve and end with our log sub-directory. We don't
-        // assert the full prefix (it's OS/user-specific) — just the tail.
+        // assert the full prefix (it's OS/user-specific) â€” just the tail.
         let dir = log_dir().expect("log dir should resolve in a test environment");
         assert!(dir.ends_with(LOG_DIR_NAME), "got {}", dir.display());
         assert!(

@@ -1,9 +1,9 @@
 <!--
-  App.svelte — root view. The Tauri/Svelte successor to main.slint.
+  App.svelte â€” root view. The Tauri/Svelte successor to main.slint.
 
   Replace the body with your first real view (put screen-level views under
   src/lib/views/, reusable pieces under src/lib/components/; see STANDARDS
-  §3.1). The title bar, theme toggle, and About dialog wiring below are the
+  Â§3.1). The title bar, theme toggle, and About dialog wiring below are the
   template's worked example of the conventions.
 -->
 <script lang="ts">
@@ -20,20 +20,20 @@
   let bridgeResult = $state("");
 
   // First paint used the localStorage cache; reconcile with the durable theme
-  // in the backend config now that async IPC is available (STANDARDS §3.3).
+  // in the backend config now that async IPC is available (STANDARDS Â§3.3).
   onMount(async () => {
     theme = await syncThemeWithConfig();
   });
 
   async function testBridge() {
     // Demonstrates the typed IPC layer calling into the Rust core.
-    bridgeResult = await greet("Brunch");
+    bridgeResult = await greet("EmFit");
   }
 
-  // All app shortcuts are dispatched here at the root (STANDARDS §3.7), not
+  // All app shortcuts are dispatched here at the root (STANDARDS Â§3.7), not
   // sprinkled through children. Open dialogs own their own Esc-to-close, so we
   // suppress the global shortcuts while one is up. Add app shortcuts (Ctrl+O,
-  // Ctrl+S, …) here as the views that need them land.
+  // Ctrl+S, â€¦) here as the views that need them land.
   function onKeydown(e: KeyboardEvent) {
     const dialogOpen = aboutOpen || shortcutsOpen;
     if (e.key === "F1") {
@@ -47,7 +47,7 @@
 
 <main>
   <header class="titlebar">
-    <h1>app-name</h1>
+    <h1>EmFit</h1>
     <div class="actions">
       <button
         class="icon-btn"
@@ -69,10 +69,10 @@
 
   <section class="body">
     <p class="hint">
-      Replace this view with your first screen. See STANDARDS §3.1.
+      Replace this view with your first screen. See STANDARDS Â§3.1.
     </p>
 
-    <button class="btn primary" onclick={testBridge}>Test shell↔core bridge</button>
+    <button class="btn primary" onclick={testBridge}>Test shellâ†”core bridge</button>
     {#if bridgeResult}
       <p class="result">{bridgeResult}</p>
     {/if}
@@ -129,7 +129,7 @@
   }
 
   /* Buttons are hand-styled here only to demonstrate the tokens. Real apps
-   * should factor a Button.svelte component on the second use (STANDARDS §3.1)
+   * should factor a Button.svelte component on the second use (STANDARDS Â§3.1)
    * and prefer native <button> semantics for focus/keyboard behavior. */
   .btn {
     height: var(--button-height);

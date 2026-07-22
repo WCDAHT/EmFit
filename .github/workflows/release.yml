@@ -9,12 +9,14 @@ name: Release
 #     major -> the canonical VERSION is bumped, committed, tagged, and published.
 #
 # The version lives in one file (`VERSION`) and is propagated to package.json,
-# Cargo.toml, tauri.conf.json, and package-lock.json by scripts/version.js â€” so a
+# Cargo.toml, tauri.conf.json, and package-lock.json by scripts/version.js Ã¢â‚¬â€ so a
 # human only ever decides the bump level (or the tag), never edits versions by hand.
 
 
 env:
-  APP_NAME: app-name
+  # Matches the cargo `[[bin]]` name / tauri `mainBinaryName`, so it is both the
+  # built executable's filename and the display name used in the Release title.
+  APP_NAME: EmFit
 
 on:
   push:
@@ -47,7 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
-      app_name: ${{ steps.export_name.outputs.app_name }} # NEW: Exporting name to other jobs
+      emfit: ${{ steps.export_name.outputs.emfit }} # NEW: Exporting name to other jobs
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,7 +57,7 @@ jobs:
 
       - name: Export App Name
         id: export_name
-        run: echo "app_name=${{ env.APP_NAME }}" >> "$GITHUB_OUTPUT"
+        run: echo "emfit=${{ env.APP_NAME }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -97,18 +99,18 @@ jobs:
       matrix:
         # Self-hosted runners (see the labels noted in checks.yml). macOS off for now.
         include:
-          # Use needs.prepare.outputs.app_name instead of env.APP_NAME
+          # Use needs.prepare.outputs.emfit instead of env.APP_NAME
           - { 
               label: windows-x64, 
               runner: [self-hosted, self-windows], 
-              bin: "${{ needs.prepare.outputs.app_name }}.exe", 
-              asset: "${{ needs.prepare.outputs.app_name }}-windows-x64.exe" 
+              bin: "${{ needs.prepare.outputs.emfit }}.exe", 
+              asset: "${{ needs.prepare.outputs.emfit }}-windows-x64.exe" 
             }
           # - { 
           #     label: linux-x86_64, 
           #     runner: [self-hosted, self-linux], 
-          #     bin: "${{ needs.prepare.outputs.app_name }}", 
-          #     asset: "${{ needs.prepare.outputs.app_name }}-linux-x86_64" 
+          #     bin: "${{ needs.prepare.outputs.emfit }}", 
+          #     asset: "${{ needs.prepare.outputs.emfit }}-linux-x86_64" 
           #   }
 
     runs-on: ${{ matrix.runner }}
