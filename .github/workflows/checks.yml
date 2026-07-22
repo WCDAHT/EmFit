@@ -1,7 +1,7 @@
 name: Checks
 
 # Lightweight gate on every push to main: formatting, lints, tests, type-check,
-# and version-sync — without the heavy release build (that lives in release.yml).
+# and version-sync - without the heavy release build (that lives in release.yml).
 # Runs on self-hosted runners (macOS commented out for now).
 on:
   push:
@@ -25,6 +25,16 @@ jobs:
     name: ${{ matrix.label }}
 
     steps:
+      # Windows caps paths at 260 chars unless git opts out; some test fixtures
+      # (Snapchat warrant-return media filenames in nested Production-* trees)
+      # exceed that, which fails the *checkout* itself - so this must run before
+      # it. `--global` (the runner user) rather than `--system`: no admin needed,
+      # and checkout's git honors it.
+      - name: Enable git long paths (Windows)
+        if: contains(matrix.label, 'windows')
+        shell: cmd
+        run: git config --global core.longpaths true
+
       - uses: actions/checkout@v4
         with:
           # Self-hosted, persistent machine: keep target/, node_modules/, and the
