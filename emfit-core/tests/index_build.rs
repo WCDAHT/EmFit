@@ -6,10 +6,11 @@
 
 use std::ops::ControlFlow;
 
-use emfit_core::model::builder::{EntrySink, IndexBuilder, ORPHAN_FOLDER_NAME, ScanWarning};
+use emfit_core::model::builder::{IndexBuilder, ORPHAN_FOLDER_NAME};
 use emfit_core::model::caps::VolumeCaps;
 use emfit_core::model::entry::{EntryFlags, RawEntry, Times};
 use emfit_core::model::index::{Index, NodeId};
+use emfit_core::model::sink::{EntrySink, ScanWarning};
 use emfit_core::service::task::CancellationToken;
 
 // ---------------------------------------------------------------------------

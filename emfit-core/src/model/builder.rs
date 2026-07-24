@@ -19,54 +19,13 @@ use std::ops::ControlFlow;
 use crate::model::caps::VolumeCaps;
 use crate::model::entry::{EntryFlags, RawEntry};
 use crate::model::index::{Index, Node, NodeId};
+use crate::model::sink::{EntrySink, ScanWarning, WarningLog};
 use crate::service::task::CancellationToken;
 
 /// Name given to the folder that collects entries whose parent could not be
 /// resolved. Flagged [`EntryFlags::SYNTHETIC`] so nothing mistakes it for a
 /// real directory on the volume.
 pub const ORPHAN_FOLDER_NAME: &str = "[Unreachable]";
-
-/// How many distinct warnings to retain before counting the rest. A corrupt
-/// volume can produce millions of `MissingParent`s; keeping them all would
-/// turn a degraded scan into an out-of-memory kill.
-const MAX_WARNINGS: usize = 128;
-
-/// Something recoverable happened. The scan continues.
-///
-/// Unrecoverable problems are returned as `Err` from the scanner instead.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScanWarning {
-    /// A directory could not be read; its contents are missing from the index.
-    UnreadableDirectory { fs_id: u64, reason: String },
-    /// A metadata record was malformed and skipped.
-    BadRecord { fs_id: u64, reason: String },
-    /// An entry named a parent that never appeared in the scan.
-    MissingParent { fs_id: u64, parent_id: u64 },
-    /// A name was not valid UTF-8 and was replaced or dropped.
-    NameNotUtf8 { fs_id: u64 },
-    /// The scan produced no root, so one was invented.
-    SynthesizedRoot,
-    /// Entries that could not be reached from the root — unresolved parents or
-    /// parent cycles — were gathered into [`ORPHAN_FOLDER_NAME`].
-    OrphansCollected { count: u64 },
-    /// Nodes remained unreachable after orphan collection. Indicates a bug in
-    /// the builder rather than bad input; should never fire.
-    UnreachableNodes { count: u64 },
-    /// A hard limit was hit and the scan stopped early.
-    LimitReached { limit: u64 },
-    /// Warnings past [`MAX_WARNINGS`] were discarded.
-    WarningsDropped { count: u64 },
-}
-
-/// Where entries land. The one implementation that matters is [`IndexBuilder`].
-pub trait EntrySink {
-    /// Copy what you need before returning — entries borrow the scanner's buffer.
-    /// Returns `Break` to stop the scan (cancel, or an early-exit limit).
-    fn push_batch(&mut self, entries: &[RawEntry<'_>]) -> ControlFlow<()>;
-
-    /// A recoverable problem. Record it and keep scanning.
-    fn warn(&mut self, w: ScanWarning);
-}
 
 /// Maps a filesystem's own ids onto [`NodeId`]s during the build.
 ///
@@ -152,8 +111,7 @@ pub struct IndexBuilder {
     // policy + diagnostics
     caps: VolumeCaps,
     cancel: CancellationToken,
-    warnings: Vec<ScanWarning>,
-    dropped_warnings: u64,
+    warnings: WarningLog,
 }
 
 impl IndexBuilder {
@@ -168,8 +126,7 @@ impl IndexBuilder {
             root_fs: None,
             caps,
             cancel,
-            warnings: Vec::new(),
-            dropped_warnings: 0,
+            warnings: WarningLog::new(),
         }
     }
 
@@ -211,7 +168,6 @@ impl IndexBuilder {
             root_fs,
             caps,
             mut warnings,
-            mut dropped_warnings,
             ..
         } = self;
 
@@ -221,11 +177,7 @@ impl IndexBuilder {
         let root = match root_fs.and_then(|fs| fs_to_node.get(fs)) {
             Some(id) => id,
             None => {
-                push_warning(
-                    &mut warnings,
-                    &mut dropped_warnings,
-                    ScanWarning::SynthesizedRoot,
-                );
+                warnings.push(ScanWarning::SynthesizedRoot);
                 synthesize_node(
                     &mut nodes,
                     &mut arena,
@@ -253,14 +205,10 @@ impl IndexBuilder {
                 Some(parent) if parent != id => node.parent = parent,
                 Some(_) => node.parent = id, // self-parent that is not the root
                 None => {
-                    push_warning(
-                        &mut warnings,
-                        &mut dropped_warnings,
-                        ScanWarning::MissingParent {
-                            fs_id: native_ids.get(i).copied().unwrap_or(0),
-                            parent_id: parent_fs_id,
-                        },
-                    );
+                    warnings.push(ScanWarning::MissingParent {
+                        fs_id: native_ids.get(i).copied().unwrap_or(0),
+                        parent_id: parent_fs_id,
+                    });
                     node.parent = id;
                 }
             }
@@ -273,13 +221,9 @@ impl IndexBuilder {
         // made.
         let unrooted = find_unrooted(&nodes, root);
         if !unrooted.is_empty() {
-            push_warning(
-                &mut warnings,
-                &mut dropped_warnings,
-                ScanWarning::OrphansCollected {
-                    count: unrooted.len() as u64,
-                },
-            );
+            warnings.push(ScanWarning::OrphansCollected {
+                count: unrooted.len() as u64,
+            });
             let folder = synthesize_node(
                 &mut nodes,
                 &mut arena,
@@ -299,18 +243,8 @@ impl IndexBuilder {
         // Pass 4 — subtree totals, children before parents.
         let visited = rollup(&mut nodes, &children, root);
         if visited != nodes.len() {
-            push_warning(
-                &mut warnings,
-                &mut dropped_warnings,
-                ScanWarning::UnreachableNodes {
-                    count: (nodes.len() - visited) as u64,
-                },
-            );
-        }
-
-        if dropped_warnings > 0 {
-            warnings.push(ScanWarning::WarningsDropped {
-                count: dropped_warnings,
+            warnings.push(ScanWarning::UnreachableNodes {
+                count: (nodes.len() - visited) as u64,
             });
         }
 
@@ -318,7 +252,7 @@ impl IndexBuilder {
         arena.shrink_to_fit();
 
         let index = Index::from_parts(nodes, arena, children, native_ids, root, caps);
-        (index, warnings)
+        (index, warnings.into_vec())
     }
 }
 
@@ -387,16 +321,7 @@ impl EntrySink for IndexBuilder {
     }
 
     fn warn(&mut self, w: ScanWarning) {
-        push_warning(&mut self.warnings, &mut self.dropped_warnings, w);
-    }
-}
-
-/// Retain a bounded number of warnings, counting the rest.
-fn push_warning(warnings: &mut Vec<ScanWarning>, dropped: &mut u64, w: ScanWarning) {
-    if warnings.len() < MAX_WARNINGS {
-        warnings.push(w);
-    } else {
-        *dropped += 1;
+        self.warnings.push(w);
     }
 }
 
