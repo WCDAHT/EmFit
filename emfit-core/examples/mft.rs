@@ -144,8 +144,8 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
                 out,
                 "  $MFT data size  {} bytes = {} records in use ({:.1}% of capacity)",
                 layout.data_size,
-                layout.record_count(),
-                100.0 * layout.record_count() as f64 / layout.capacity_records() as f64,
+                layout.records_to_scan(),
+                100.0 * layout.records_to_scan() as f64 / layout.capacity_records() as f64,
             )?;
             Some(layout.extents)
         }
@@ -182,7 +182,198 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
         Err(e) => writeln!(out, "\nretrieval pointers unavailable: {e}")?,
     }
 
+    // The sweep: read every record and build an index from it.
+    let layout = ntfs::bootstrap::probe_with_boot(&src, boot)?;
+    sweep_and_build(&src, &layout, out)?;
+
     Ok(())
+}
+
+/// Run the full sweep into a real `IndexBuilder`, then report on both.
+#[cfg(windows)]
+fn sweep_and_build(
+    src: &FileBlockSource,
+    layout: &ntfs::MftLayout,
+    out: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use emfit_core::model::builder::IndexBuilder;
+    use emfit_core::model::caps::VolumeCaps;
+    use emfit_core::service::task::{CancellationToken, Progress};
+
+    let caps = VolumeCaps {
+        case_sensitive: false,
+        has_stable_ids: true,
+        has_hard_links: true,
+        has_allocated_size: true,
+        live_updates: true,
+        sizes_are_exact: true,
+        path_separator: '\\',
+        root_label: "C:".to_string(),
+    };
+
+    let cancel = CancellationToken::new();
+    let mut builder = IndexBuilder::new(caps, cancel.clone());
+    let mut phase = String::new();
+    let mut progress = |p: Progress| {
+        if let Progress::Started { message, .. } = &p {
+            phase = message.clone();
+        }
+    };
+
+    writeln!(out, "\n{}", "=".repeat(60))?;
+    writeln!(out, "SWEEP")?;
+
+    let stats = ntfs::sweep(
+        src,
+        layout,
+        &mut builder,
+        &mut progress,
+        &cancel,
+        ntfs::ScanOptions::default(),
+    )?;
+
+    writeln!(out, "\nread:")?;
+    writeln!(out, "  records read      {}", stats.records_read)?;
+    writeln!(out, "  in use            {}", stats.records_in_use)?;
+    if let Some(live) = stats.bitmap_in_use {
+        writeln!(
+            out,
+            "  bitmap says       {live}  (agrees: {})",
+            live == stats.records_in_use
+        )?;
+    }
+    writeln!(
+        out,
+        "  bytes read        {} ({} reads, {:.1} MiB avg)",
+        stats.bytes_read,
+        stats.reads,
+        stats.bytes_read as f64 / stats.reads.max(1) as f64 / (1024.0 * 1024.0)
+    )?;
+
+    writeln!(out, "\nemitted:")?;
+    writeln!(out, "  entries           {}", stats.entries_emitted)?;
+    writeln!(out, "  files             {}", stats.files)?;
+    writeln!(out, "  directories       {}", stats.directories)?;
+
+    writeln!(out, "\nnot yet handled:")?;
+    writeln!(
+        out,
+        "  extension records {}  (name or size may be missing)",
+        stats.extension_records
+    )?;
+    writeln!(
+        out,
+        "  multi-linked      {}  (extra hard links not emitted)",
+        stats.multi_linked_records
+    )?;
+    writeln!(out, "  unnamed           {}", stats.unnamed_records)?;
+    writeln!(out, "  8.3-only          {}", stats.dos_only_records)?;
+    writeln!(out, "  bad header        {}", stats.bad_records)?;
+    writeln!(out, "  failed fixup      {}", stats.failed_fixup)?;
+
+    writeln!(out, "\nspeed:")?;
+    writeln!(
+        out,
+        "  elapsed           {:.3}s",
+        stats.elapsed.as_secs_f64()
+    )?;
+    writeln!(
+        out,
+        "  rate              {:.0} records/s, {:.0} MiB/s",
+        stats.records_per_second(),
+        stats.mib_per_second()
+    )?;
+
+    // Build the index and see whether the tree actually holds together.
+    let build_started = std::time::Instant::now();
+    let (index, warnings) = builder.finish();
+    let build_time = build_started.elapsed();
+
+    writeln!(out, "\nindex:")?;
+    writeln!(out, "  build time        {:.3}s", build_time.as_secs_f64())?;
+    writeln!(out, "  nodes             {}", index.len())?;
+    let root = index.node(index.root());
+    writeln!(out, "  root path         {}", index.path(index.root()))?;
+    writeln!(
+        out,
+        "  root children     {}",
+        index.children(index.root()).len()
+    )?;
+    writeln!(out, "  total size        {} bytes", root.total_size())?;
+    writeln!(out, "  total allocated   {} bytes", root.total_allocated())?;
+    writeln!(out, "  files in tree     {}", root.file_count())?;
+    writeln!(out, "  dirs in tree      {}", root.dir_count())?;
+
+    if warnings.is_empty() {
+        writeln!(out, "  warnings          none")?;
+    } else {
+        writeln!(out, "  warnings          {}", warnings.len())?;
+        for w in warnings.iter().take(10) {
+            writeln!(out, "    {w:?}")?;
+        }
+    }
+
+    // A few real paths, as a sanity check that the tree is the shape it should
+    // be rather than merely well-formed.
+    writeln!(out, "\nsample paths (deepest found):")?;
+    let mut deepest: Vec<(usize, String)> = Vec::new();
+    for id in index.ids().take(400_000) {
+        if index.node(id).is_directory() {
+            continue;
+        }
+        let path = index.path(id);
+        let depth = path.matches('\\').count();
+        if deepest.len() < 8 {
+            deepest.push((depth, path));
+            deepest.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
+        } else if depth > deepest[7].0 {
+            deepest[7] = (depth, path);
+            deepest.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
+        }
+    }
+    for (_, path) in &deepest {
+        writeln!(out, "  {path}")?;
+    }
+
+    writeln!(out, "\nlargest directories:")?;
+    let mut dirs: Vec<_> = index
+        .ids()
+        .filter(|&id| index.node(id).is_directory())
+        .map(|id| (index.node(id).total_size(), id))
+        .collect();
+    dirs.sort_unstable_by_key(|(size, _)| std::cmp::Reverse(*size));
+    for (size, id) in dirs.iter().take(10) {
+        writeln!(out, "  {:>15}  {}", format_bytes(*size), index.path(*id))?;
+    }
+
+    writeln!(out, "\nlargest files:")?;
+    let mut files: Vec<_> = index
+        .ids()
+        .filter(|&id| !index.node(id).is_directory())
+        .map(|id| (index.node(id).size(), id))
+        .collect();
+    files.sort_unstable_by_key(|(size, _)| std::cmp::Reverse(*size));
+    for (size, id) in files.iter().take(10) {
+        writeln!(out, "  {:>15}  {}", format_bytes(*size), index.path(*id))?;
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
+    }
 }
 
 #[cfg(windows)]

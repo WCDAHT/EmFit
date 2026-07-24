@@ -32,16 +32,20 @@
 //! this reason.
 
 pub mod attr;
+pub mod bitmap;
 pub mod boot;
 pub mod bootstrap;
 pub mod extents;
 pub mod record;
 pub mod retrieval;
 pub mod runs;
+pub mod scanner;
 
 pub use attr::{Attribute, AttributeType, FileName, Namespace, NonResident, StandardInfo};
+pub use bitmap::MftBitmap;
 pub use boot::BootSector;
 pub use bootstrap::{MftLayout, probe, read_boot_sector};
 pub use extents::{Extent, MftExtents, RecordLocation};
 pub use record::{Record, RecordHeader};
 pub use runs::DataRun;
+pub use scanner::{ScanOptions, ScanStats, sweep};
