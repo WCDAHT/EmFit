@@ -18,6 +18,7 @@
 //! talks to `IndexBuilder` directly, never touching the index's internals.
 
 pub mod block;
+pub mod ntfs;
 
 use std::path::Path;
 
