@@ -83,7 +83,7 @@ and a slow search.
   ├────────────────────────────────────────────────────────┤
   │ emfit-core/model/    Index · Node · arena · CSR         │  ← shared, boring
   │                      IndexBuilder (the EntrySink)       │
-  ├────────────────────────────────────────────────────────┤
+  ├─────────────────────────────────────────────────────────┤
   │ emfit-core/parser/   FsScanner: ntfs · walker · ext4…   │  ← the seam
   │                      BlockSource: volume · disk · image │
   └────────────────────────────────────────────────────────┘
