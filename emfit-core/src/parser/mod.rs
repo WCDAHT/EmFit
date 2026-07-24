@@ -9,6 +9,15 @@
 //! Apps with one or two formats should delete this module's contents and
 //! use an enum. Apps with three or more keep the trait and register their
 //! parsers in `ParserRegistry::default()`.
+//!
+//! For EmFit the "formats" are filesystems. Two orthogonal axes live here
+//! (`architecture.md` §4): [`block`] is *where bytes come from* — a volume, a
+//! physical drive, an image — and the filesystem scanners are *how to
+//! interpret them*. The `FsScanner` trait that generalizes the second axis is
+//! deliberately not written until a second scanner exists; until then NTFS
+//! talks to `IndexBuilder` directly, never touching the index's internals.
+
+pub mod block;
 
 use std::path::Path;
 

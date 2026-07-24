@@ -14,6 +14,51 @@ pub enum Error {
     #[error("parse error in {format} parser: {message}")]
     Parse { format: String, message: String },
 
+    /// A raw device or disk image could not be opened. Most often a missing
+    /// drive, or raw volume access attempted without Administrator rights.
+    #[error("cannot open {path}: {source}")]
+    Device {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A read from a device or image failed.
+    #[error("read of {len} bytes at offset {offset} on {device} failed: {source}")]
+    BlockRead {
+        device: String,
+        offset: u64,
+        len: usize,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A read returned fewer bytes than required, having run past the end of
+    /// the device, image, or partition.
+    #[error("read at offset {offset} on {device} returned {got} of {wanted} bytes")]
+    ShortRead {
+        device: String,
+        offset: u64,
+        wanted: usize,
+        got: usize,
+    },
+
+    /// Unbuffered device reads require the offset, the length, *and* the
+    /// buffer's address to be sector-aligned. A caller bug, reported plainly
+    /// rather than as the OS's opaque "invalid parameter".
+    #[error(
+        "misaligned unbuffered read on {device}: offset {offset}, length {len}, \
+         buffer address off by {buffer_align} — all must be multiples of the \
+         {sector_size}-byte sector"
+    )]
+    Misaligned {
+        device: String,
+        offset: u64,
+        len: usize,
+        buffer_align: usize,
+        sector_size: u32,
+    },
+
     /// JSON (de)serialisation failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
