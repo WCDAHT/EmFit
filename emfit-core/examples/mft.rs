@@ -9,12 +9,22 @@
 //! target\debug\examples\mft.exe C
 //! ```
 
+#[cfg(windows)]
 use std::fmt::Write as _;
 
+#[cfg(windows)]
 use emfit_core::parser::block::{AlignedBuf, BlockSource, FileBlockSource};
-use emfit_core::parser::ntfs::{BootSector, MftExtents, retrieval};
+#[cfg(windows)]
+use emfit_core::parser::ntfs::{self as ntfs, BootSector, MftExtents, retrieval};
+#[cfg(windows)]
 use emfit_core::service::{elevation, volume};
 
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("This diagnostic reads raw NTFS volumes; it only runs on Windows.");
+}
+
+#[cfg(windows)]
 fn main() {
     let letter = std::env::args()
         .nth(1)
@@ -38,6 +48,7 @@ fn main() {
     let _ = std::fs::write("mft-report.txt", &out);
 }
 
+#[cfg(windows)]
 fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Error>> {
     writeln!(out, "elevated: {}", elevation::is_elevated())?;
 
@@ -120,10 +131,53 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
         if sig == b"FILE" { "OK" } else { "UNEXPECTED" }
     )?;
 
+    // Parse record 0 properly: fixup, attribute walk, and what it says about
+    // the table it lives in.
+    dump_record_zero(&src, &boot, r0.byte_offset, out)?;
+
+    // Route 1: read the map out of $MFT itself.
+    let from_record = match ntfs::bootstrap::probe_with_boot(&src, boot) {
+        Ok(layout) => {
+            writeln!(out, "\n$MFT extent map (from record 0's $DATA):")?;
+            describe(&layout.extents, out)?;
+            writeln!(
+                out,
+                "  $MFT data size  {} bytes = {} records in use ({:.1}% of capacity)",
+                layout.data_size,
+                layout.record_count(),
+                100.0 * layout.record_count() as f64 / layout.capacity_records() as f64,
+            )?;
+            Some(layout.extents)
+        }
+        Err(e) => {
+            writeln!(out, "\nbootstrap from record 0 failed: {e}")?;
+            None
+        }
+    };
+
+    // Route 2: ask the driver, and check the two agree.
     match retrieval::mft_extents(letter, boot.bytes_per_cluster, boot.bytes_per_record) {
         Ok(map) => {
             writeln!(out, "\n$MFT extent map (FSCTL_GET_RETRIEVAL_POINTERS):")?;
             describe(&map, out)?;
+            if let Some(from_record) = from_record {
+                writeln!(
+                    out,
+                    "\nthe two routes agree: {}",
+                    if from_record == map {
+                        "YES".to_string()
+                    } else {
+                        format!(
+                            "NO — record 0 gave {} fragments / {} clusters, \
+                             the driver gave {} / {}",
+                            from_record.fragment_count(),
+                            from_record.total_clusters(),
+                            map.fragment_count(),
+                            map.total_clusters()
+                        )
+                    }
+                )?;
+            }
         }
         Err(e) => writeln!(out, "\nretrieval pointers unavailable: {e}")?,
     }
@@ -131,6 +185,142 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+#[cfg(windows)]
+/// Parse record 0 and report what it says — the first real exercise of the
+/// fixup and attribute walk against live data.
+fn dump_record_zero(
+    src: &FileBlockSource,
+    boot: &BootSector,
+    offset: u64,
+    out: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut buf = AlignedBuf::for_source(src, boot.bytes_per_cluster as usize);
+    src.read_exact_at(offset, buf.as_mut_slice())?;
+
+    let record_bytes = &mut buf.as_mut_slice()[..boot.bytes_per_record as usize];
+    let header = ntfs::RecordHeader::parse(record_bytes)?;
+
+    writeln!(out, "\nrecord 0 header:")?;
+    writeln!(out, "  in use          {}", header.is_in_use())?;
+    writeln!(out, "  directory       {}", header.is_directory())?;
+    writeln!(out, "  hard links      {}", header.hard_link_count)?;
+    writeln!(out, "  sequence        {}", header.sequence_number)?;
+    writeln!(
+        out,
+        "  used / alloc    {} / {} bytes",
+        header.used_size, header.allocated_size
+    )?;
+    writeln!(out, "  base record     {:?}", header.base_record())?;
+    writeln!(out, "  self-reported # {}", header.record_number)?;
+    writeln!(
+        out,
+        "  fixup array     offset {}, {} entries",
+        header.update_sequence_offset, header.update_sequence_count
+    )?;
+
+    let record = ntfs::Record::parse(record_bytes, boot.bytes_per_sector)?;
+    writeln!(out, "  fixup applied   OK")?;
+
+    writeln!(out, "\nrecord 0 attributes:")?;
+    let mut name_buf = String::new();
+    for attribute in record.attributes() {
+        let kind = match attribute.kind() {
+            ntfs::AttributeType::StandardInformation => "$STANDARD_INFORMATION".to_string(),
+            ntfs::AttributeType::AttributeList => "$ATTRIBUTE_LIST".to_string(),
+            ntfs::AttributeType::FileName => "$FILE_NAME".to_string(),
+            ntfs::AttributeType::Data => "$DATA".to_string(),
+            ntfs::AttributeType::Other(code) => format!("type {code:#04X}"),
+            ntfs::AttributeType::End => break,
+        };
+        writeln!(
+            out,
+            "  {:<22} {:>5} bytes  {}",
+            kind,
+            attribute.len(),
+            if attribute.is_non_resident() {
+                "non-resident"
+            } else {
+                "resident"
+            }
+        )?;
+
+        match attribute.kind() {
+            ntfs::AttributeType::FileName => {
+                if let Some(value) = attribute.resident_value()
+                    && let Some(fname) = ntfs::FileName::parse(value)
+                {
+                    fname.decode_name_into(&mut name_buf);
+                    writeln!(
+                        out,
+                        "      name '{}'  parent record {}  namespace {:?}",
+                        name_buf,
+                        fname.parent_record(),
+                        fname.namespace()
+                    )?;
+                }
+            }
+            ntfs::AttributeType::StandardInformation => {
+                if let Some(value) = attribute.resident_value()
+                    && let Some(si) = ntfs::StandardInfo::parse(value)
+                {
+                    writeln!(
+                        out,
+                        "      attributes {:#010X}  created {}  modified {}",
+                        si.attributes,
+                        unix_nanos_to_date(si.created),
+                        unix_nanos_to_date(si.modified)
+                    )?;
+                }
+            }
+            ntfs::AttributeType::Data => {
+                if let Some(nr) = attribute.non_resident() {
+                    writeln!(
+                        out,
+                        "      vcn {}..{}  data {} bytes  allocated {} bytes  {} runs",
+                        nr.starting_vcn(),
+                        nr.last_vcn(),
+                        nr.data_size(),
+                        nr.allocated_size(),
+                        nr.data_runs().len()
+                    )?;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+/// Just enough date formatting to eyeball a timestamp.
+fn unix_nanos_to_date(nanos: i64) -> String {
+    if nanos == 0 {
+        return "(unset)".to_string();
+    }
+    let secs = nanos / 1_000_000_000;
+    // Days since the epoch, converted with the civil-from-days algorithm.
+    let days = secs.div_euclid(86_400);
+    let time = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}Z",
+        time / 3600,
+        (time % 3600) / 60,
+        time % 60
+    )
+}
+
+#[cfg(windows)]
 fn describe(map: &MftExtents, out: &mut String) -> Result<(), Box<dyn std::error::Error>> {
     writeln!(out, "  fragments       {}", map.fragment_count())?;
     writeln!(out, "  total clusters  {}", map.total_clusters())?;

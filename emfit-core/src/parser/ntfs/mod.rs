@@ -31,11 +31,17 @@
 //! lists. The bootstrap reads the first several records in one go for exactly
 //! this reason.
 
+pub mod attr;
 pub mod boot;
+pub mod bootstrap;
 pub mod extents;
+pub mod record;
 pub mod retrieval;
 pub mod runs;
 
+pub use attr::{Attribute, AttributeType, FileName, Namespace, NonResident, StandardInfo};
 pub use boot::BootSector;
+pub use bootstrap::{MftLayout, probe, read_boot_sector};
 pub use extents::{Extent, MftExtents, RecordLocation};
+pub use record::{Record, RecordHeader};
 pub use runs::DataRun;
