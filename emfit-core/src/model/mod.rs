@@ -11,3 +11,4 @@ pub mod builder;
 pub mod caps;
 pub mod entry;
 pub mod index;
+pub mod volume;

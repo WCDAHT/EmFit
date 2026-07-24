@@ -5,6 +5,8 @@
 
 pub mod case;
 pub mod config;
+pub mod elevation;
 pub mod export;
 pub mod logging;
 pub mod task;
+pub mod volume;

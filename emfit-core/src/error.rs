@@ -80,6 +80,21 @@ pub enum Error {
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
 
+    /// A Windows API call failed. Carries the API's name so a raw OS error
+    /// code can be traced back to the call that produced it.
+    #[error("{api} failed: {source}")]
+    WindowsApi {
+        api: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The operation exists only on some platforms — raw volume access and
+    /// elevation are Windows-only. Returned rather than `cfg`-gating the
+    /// function away, so callers need no conditional compilation.
+    #[error("{operation} is not supported on this platform")]
+    UnsupportedPlatform { operation: String },
+
     /// A long-running operation was cancelled by the user. See
     /// `service::task::CancellationToken`.
     #[error("operation cancelled")]

@@ -18,5 +18,11 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 chrono = { workspace = true }
 
+# Volume discovery and elevation checks. Windows-only by design: the rest of
+# the core — including raw device reads — runs on `std` alone, so Linux and
+# macOS CI still build and test everything above the discovery layer.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
 [lints]
 workspace = true
