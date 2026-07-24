@@ -125,6 +125,14 @@ impl Node {
         self.flags().is_synthetic()
     }
 
+    /// True for an extra hard-link name whose bytes are counted under another
+    /// entry. Its [`Node::allocated`] is zero for that reason, not because the
+    /// file is empty. See [`EntryFlags::ALIAS`].
+    #[inline]
+    pub fn is_alias(&self) -> bool {
+        self.flags().is_alias()
+    }
+
     /// Logical size. Zero for directories — use [`Node::total_size`] for the
     /// number a user expects to see next to a folder.
     #[inline]

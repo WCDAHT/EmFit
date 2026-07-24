@@ -95,6 +95,28 @@ impl<'a> Attribute<'a> {
         self.name_len() == 0
     }
 
+    /// Attribute-level flags — compression, encryption, sparseness.
+    ///
+    /// More reliable than the DOS attribute bits in `$STANDARD_INFORMATION`,
+    /// which describe the *file* while these describe *this stream*.
+    pub fn flags(&self) -> u16 {
+        read_u16(self.data, 0x0C)
+    }
+
+    /// The stream is compressed, so its logical size exceeds what it occupies.
+    pub fn is_compressed(&self) -> bool {
+        self.flags() & 0x00FF != 0
+    }
+
+    /// The stream has holes that occupy nothing.
+    pub fn is_sparse(&self) -> bool {
+        self.flags() & 0x8000 != 0
+    }
+
+    pub fn is_encrypted(&self) -> bool {
+        self.flags() & 0x4000 != 0
+    }
+
     /// The name as raw UTF-16LE bytes, for the rare caller that wants it.
     pub fn name_bytes(&self) -> &'a [u8] {
         let offset = read_u16(self.data, 0x0A) as usize;
@@ -153,10 +175,41 @@ impl<'a> NonResident<'a> {
         read_u64(self.data, 0x18)
     }
 
-    /// Bytes actually occupied on disk — a whole number of clusters, and less
-    /// than the logical size when the file is compressed or sparse.
+    /// Size of the **virtual** cluster range this attribute spans.
+    ///
+    /// Despite the name this is not always what the file occupies. For a
+    /// compressed or sparse stream it is the size the data *would* take if it
+    /// were laid out plainly — holes and compressed runs included. The figure
+    /// a user means by "size on disk" is [`Self::physical_size`].
     pub fn allocated_size(&self) -> u64 {
         read_u64(self.data, 0x28)
+    }
+
+    /// Compression unit, as a power-of-two count of clusters. Zero means the
+    /// stream is stored plainly, and is also what says whether
+    /// [`Self::compressed_size`] is present at all.
+    pub fn compression_unit(&self) -> u16 {
+        read_u16(self.data, 0x22)
+    }
+
+    /// Bytes genuinely occupied, for a compressed or sparse stream.
+    ///
+    /// This field only exists when [`Self::compression_unit`] is non-zero —
+    /// the header is 64 bytes without it and 72 with it — so reading it
+    /// unconditionally would pick up whatever follows.
+    pub fn compressed_size(&self) -> Option<u64> {
+        (self.compression_unit() != 0 && self.data.len() >= 0x48).then(|| read_u64(self.data, 0x40))
+    }
+
+    /// What this stream actually costs on disk.
+    ///
+    /// The compressed size when there is one, the allocated range otherwise.
+    /// Using [`Self::allocated_size`] directly overstates every compressed and
+    /// sparse file, which on a Windows volume is enough to push a whole-disk
+    /// total several gigabytes past what the filesystem reports as used.
+    pub fn physical_size(&self) -> u64 {
+        self.compressed_size()
+            .unwrap_or_else(|| self.allocated_size())
     }
 
     /// The file's logical size: what a user calls "size".
@@ -540,6 +593,88 @@ mod tests {
         assert!(!attr.is_non_resident());
         assert_eq!(attr.resident_value(), Some(&[1u8, 2, 3, 4, 5][..]));
         assert!(attr.non_resident().is_none());
+    }
+
+    #[test]
+    fn a_plain_stream_occupies_its_allocated_range() {
+        let buf = non_resident(0x80, 30_000, 32_768, &[0x21, 0x08, 0x00, 0x01, 0x00]);
+        let nr = AttributeIter::new(&buf, 0)
+            .next()
+            .unwrap()
+            .non_resident()
+            .unwrap();
+
+        assert_eq!(nr.compression_unit(), 0);
+        assert_eq!(
+            nr.compressed_size(),
+            None,
+            "no such field on a plain stream"
+        );
+        assert_eq!(nr.physical_size(), 32_768);
+    }
+
+    #[test]
+    fn a_compressed_stream_occupies_its_compressed_size() {
+        // The distinction that keeps a whole-volume total honest: allocated
+        // describes the virtual range, compressed_size what it really costs.
+        let runs = [0x21u8, 0x08, 0x00, 0x01, 0x00];
+        let total = 0x48 + runs.len();
+        let mut buf = vec![0u8; total.next_multiple_of(8)];
+        let len = buf.len() as u32;
+        buf[0x00..0x04].copy_from_slice(&0x80u32.to_le_bytes());
+        buf[0x04..0x08].copy_from_slice(&len.to_le_bytes());
+        buf[0x08] = 1; // non-resident
+        buf[0x0C..0x0E].copy_from_slice(&0x0001u16.to_le_bytes()); // compressed
+        buf[0x20..0x22].copy_from_slice(&0x48u16.to_le_bytes()); // runs offset
+        buf[0x22..0x24].copy_from_slice(&4u16.to_le_bytes()); // compression unit
+        buf[0x28..0x30].copy_from_slice(&65_536u64.to_le_bytes()); // allocated
+        buf[0x30..0x38].copy_from_slice(&60_000u64.to_le_bytes()); // logical
+        buf[0x38..0x40].copy_from_slice(&60_000u64.to_le_bytes()); // initialized
+        buf[0x40..0x48].copy_from_slice(&20_480u64.to_le_bytes()); // compressed
+        buf[0x48..0x48 + runs.len()].copy_from_slice(&runs);
+
+        let attr = AttributeIter::new(&buf, 0).next().unwrap();
+        assert!(attr.is_compressed());
+        assert!(!attr.is_sparse());
+
+        let nr = attr.non_resident().unwrap();
+        assert_eq!(nr.data_size(), 60_000, "what a user calls the size");
+        assert_eq!(nr.allocated_size(), 65_536, "the virtual range");
+        assert_eq!(nr.compressed_size(), Some(20_480));
+        assert_eq!(
+            nr.physical_size(),
+            20_480,
+            "counting 65_536 here would inflate every compressed file"
+        );
+    }
+
+    #[test]
+    fn a_truncated_compressed_header_falls_back_rather_than_reading_past_it() {
+        // compression_unit says the field is there, but the attribute is too
+        // short to hold it — reading anyway would pick up the run list.
+        let mut buf = non_resident(0x80, 1000, 4096, &[0x00]);
+        buf[0x22..0x24].copy_from_slice(&4u16.to_le_bytes());
+        buf.truncate(0x44);
+        let len = buf.len() as u32;
+        buf[0x04..0x08].copy_from_slice(&len.to_le_bytes());
+
+        let nr = NonResident { data: &buf };
+        assert_eq!(nr.compressed_size(), None);
+        assert_eq!(nr.physical_size(), 4096);
+    }
+
+    #[test]
+    fn attribute_flags_are_readable() {
+        let mut sparse = non_resident(0x80, 1000, 4096, &[0x00]);
+        sparse[0x0C..0x0E].copy_from_slice(&0x8000u16.to_le_bytes());
+        let attr = AttributeIter::new(&sparse, 0).next().unwrap();
+        assert!(attr.is_sparse());
+        assert!(!attr.is_compressed());
+
+        let mut encrypted = non_resident(0x80, 1000, 4096, &[0x00]);
+        encrypted[0x0C..0x0E].copy_from_slice(&0x4000u16.to_le_bytes());
+        let attr = AttributeIter::new(&encrypted, 0).next().unwrap();
+        assert!(attr.is_encrypted());
     }
 
     #[test]

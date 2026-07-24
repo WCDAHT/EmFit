@@ -76,6 +76,17 @@ impl EntryFlags {
     /// distinctly and exports can disclose them rather than passing them off
     /// as real files.
     pub const SYNTHETIC: Self = Self(1 << 6);
+    /// An additional name for a file counted elsewhere.
+    ///
+    /// A hard-linked file appears once per name, and each of those entries is
+    /// a real path a user can open. But the bytes exist once, so exactly one
+    /// entry carries the allocated size and the rest carry zero and this flag.
+    ///
+    /// Both halves matter: without the extra entries the file is missing from
+    /// most of its locations, and without the zeroing a WinSxS-heavy volume
+    /// reports several times the disk it actually uses. WizTree draws the same
+    /// distinction by showing the non-owning links' size in parentheses.
+    pub const ALIAS: Self = Self(1 << 7);
 
     /// No bits set.
     #[inline]
@@ -119,6 +130,13 @@ impl EntryFlags {
     #[inline]
     pub const fn is_synthetic(self) -> bool {
         self.contains(Self::SYNTHETIC)
+    }
+
+    /// True for an extra name whose bytes are accounted under another entry.
+    /// See [`EntryFlags::ALIAS`].
+    #[inline]
+    pub const fn is_alias(self) -> bool {
+        self.contains(Self::ALIAS)
     }
 }
 

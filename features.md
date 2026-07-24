@@ -189,6 +189,7 @@ WizTree.
 
 ## 4.2 Treemap
 
+- `[new]` **Rectangles are sized by allocated size, not logical size.** Confirmed against WizTree: a folder holding one 100 MB file under four hard-link names draws **one** 100 MB rectangle, not four — its treemap is driven by what the files occupy on disk, and so must ours. The obvious choice (logical `total_size`) is the wrong one; it would draw hard-linked and sparse regions several times too large. Use `total_allocated`, with the same one-owner-per-hard-link accounting the file list uses (see §1.3 hard links) so a WinSxS subtree is not multiply counted. The size *label* on a rectangle may still show logical size; only the geometry must use allocated.
 - `[v1]` **Squarified hierarchical treemap** with nested containers, depth-limited (v1 caps at 8), sizes derived from the rollup.
 - `[v1]` **Drill down** (double-click) and **go up** (Back/Backspace), with a **breadcrumb** trail.
 - `[v1]` **Selection highlight** and an info bar showing the selected item's name and size.

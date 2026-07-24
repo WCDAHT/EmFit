@@ -184,7 +184,7 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
 
     // The sweep: read every record and build an index from it.
     let layout = ntfs::bootstrap::probe_with_boot(&src, boot)?;
-    sweep_and_build(&src, &layout, out)?;
+    sweep_and_build(&src, &layout, vol.used_bytes(), out)?;
 
     Ok(())
 }
@@ -194,6 +194,7 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
 fn sweep_and_build(
     src: &FileBlockSource,
     layout: &ntfs::MftLayout,
+    used_bytes: u64,
     out: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use emfit_core::model::builder::IndexBuilder;
@@ -255,12 +256,21 @@ fn sweep_and_build(
     writeln!(out, "  files             {}", stats.files)?;
     writeln!(out, "  directories       {}", stats.directories)?;
 
-    writeln!(out, "\nnot yet handled:")?;
+    writeln!(out, "\nsplit files (attributes in extension records):")?;
+    writeln!(out, "  extension records {}", stats.extension_records)?;
+    writeln!(out, "  bases held back   {}", stats.deferred_bases)?;
     writeln!(
         out,
-        "  extension records {}  (name or size may be missing)",
-        stats.extension_records
+        "  gained a name/size {}",
+        stats.resolved_from_extensions
     )?;
+    writeln!(
+        out,
+        "  orphaned exts     {}  (base never appeared)",
+        stats.orphaned_extensions
+    )?;
+
+    writeln!(out, "\nstill dropped:")?;
     writeln!(
         out,
         "  multi-linked      {}  (extra hard links not emitted)",
@@ -268,8 +278,16 @@ fn sweep_and_build(
     )?;
     writeln!(out, "  unnamed           {}", stats.unnamed_records)?;
     writeln!(out, "  8.3-only          {}", stats.dos_only_records)?;
-    writeln!(out, "  bad header        {}", stats.bad_records)?;
+    writeln!(out, "  bad signature     {}", stats.bad_records)?;
+    writeln!(out, "  never-used slots  {}", stats.never_used_slots)?;
     writeln!(out, "  failed fixup      {}", stats.failed_fixup)?;
+    writeln!(
+        out,
+        "  accounted for     {} of {} live records ({:.2}%)",
+        stats.entries_emitted,
+        stats.records_in_use,
+        100.0 * stats.entries_emitted as f64 / stats.records_in_use.max(1) as f64
+    )?;
 
     writeln!(out, "\nspeed:")?;
     writeln!(
@@ -304,6 +322,17 @@ fn sweep_and_build(
     writeln!(out, "  files in tree     {}", root.file_count())?;
     writeln!(out, "  dirs in tree      {}", root.dir_count())?;
 
+    // The number that says whether the scan is believable: does what we found
+    // add up to what the filesystem says is in use?
+    writeln!(
+        out,
+        "\n  volume in use     {}\n  we account for    {}  ({:.1}%)\n  unaccounted       {}",
+        format_bytes(used_bytes),
+        format_bytes(root.total_size()),
+        100.0 * root.total_size() as f64 / used_bytes.max(1) as f64,
+        format_bytes(used_bytes.saturating_sub(root.total_size())),
+    )?;
+
     if warnings.is_empty() {
         writeln!(out, "  warnings          none")?;
     } else {
@@ -312,6 +341,8 @@ fn sweep_and_build(
             writeln!(out, "    {w:?}")?;
         }
     }
+
+    size_breakdown(&index, out)?;
 
     // A few real paths, as a sanity check that the tree is the shape it should
     // be rather than merely well-formed.
@@ -355,6 +386,155 @@ fn sweep_and_build(
     files.sort_unstable_by_key(|(size, _)| std::cmp::Reverse(*size));
     for (size, id) in files.iter().take(10) {
         writeln!(out, "  {:>15}  {}", format_bytes(*size), index.path(*id))?;
+    }
+
+    Ok(())
+}
+
+/// Break the total down by file kind, to find where an overcount comes from.
+///
+/// The tell is logical size far exceeding allocated size: a sparse file, a
+/// compressed one, or a cloud placeholder all report their full logical length
+/// while occupying little or nothing on disk. Summing logical sizes then
+/// overshoots what the volume says is used.
+#[cfg(windows)]
+fn size_breakdown(
+    index: &emfit_core::model::index::Index,
+    out: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use emfit_core::model::entry::EntryFlags;
+
+    #[derive(Default)]
+    struct Bucket {
+        count: u64,
+        size: u64,
+        allocated: u64,
+    }
+    impl Bucket {
+        fn add(&mut self, size: u64, allocated: u64) {
+            self.count += 1;
+            self.size += size;
+            self.allocated += allocated;
+        }
+    }
+
+    let mut metafiles = Bucket::default();
+    let mut sparse = Bucket::default();
+    let mut compressed = Bucket::default();
+    let mut reparse = Bucket::default();
+    let mut resident = Bucket::default();
+    let mut ordinary = Bucket::default();
+
+    // Files whose logical size most exceeds what they occupy — the individual
+    // culprits, if there are a few big ones rather than many small ones.
+    let mut inflated: Vec<(u64, emfit_core::model::index::NodeId)> = Vec::new();
+
+    for id in index.ids() {
+        let node = index.node(id);
+        if node.is_directory() || node.is_synthetic() {
+            continue;
+        }
+        let (size, allocated) = (node.size(), node.allocated());
+        let flags = node.flags();
+
+        // Records 0-15 are the filesystem's own metadata.
+        let is_metafile = index.native_id(id).is_some_and(|n| n < 16);
+
+        if is_metafile {
+            metafiles.add(size, allocated);
+        } else if flags.contains(EntryFlags::SPARSE) {
+            sparse.add(size, allocated);
+        } else if flags.contains(EntryFlags::COMPRESSED) {
+            compressed.add(size, allocated);
+        } else if flags.contains(EntryFlags::REPARSE) {
+            reparse.add(size, allocated);
+        } else if allocated == 0 && size > 0 {
+            // No clusters: the contents live inside the MFT record itself, and
+            // those bytes are already counted as part of $MFT.
+            resident.add(size, allocated);
+        } else {
+            ordinary.add(size, allocated);
+        }
+
+        if size > allocated {
+            let excess = size - allocated;
+            if excess > 16 * 1024 * 1024 {
+                inflated.push((excess, id));
+            }
+        }
+    }
+
+    writeln!(out, "\nsize breakdown (files only):")?;
+    writeln!(
+        out,
+        "  {:<22} {:>10} {:>15} {:>15}",
+        "kind", "count", "logical", "allocated"
+    )?;
+    for (label, bucket) in [
+        ("system metafiles", &metafiles),
+        ("sparse", &sparse),
+        ("compressed", &compressed),
+        ("reparse points", &reparse),
+        ("resident (0 clusters)", &resident),
+        ("ordinary", &ordinary),
+    ] {
+        writeln!(
+            out,
+            "  {:<22} {:>10} {:>15} {:>15}",
+            label,
+            bucket.count,
+            format_bytes(bucket.size),
+            format_bytes(bucket.allocated)
+        )?;
+    }
+
+    let total_logical = metafiles.size
+        + sparse.size
+        + compressed.size
+        + reparse.size
+        + resident.size
+        + ordinary.size;
+    let total_alloc = metafiles.allocated
+        + sparse.allocated
+        + compressed.allocated
+        + reparse.allocated
+        + resident.allocated
+        + ordinary.allocated;
+    writeln!(
+        out,
+        "  {:<22} {:>10} {:>15} {:>15}",
+        "TOTAL",
+        metafiles.count
+            + sparse.count
+            + compressed.count
+            + reparse.count
+            + resident.count
+            + ordinary.count,
+        format_bytes(total_logical),
+        format_bytes(total_alloc)
+    )?;
+
+    writeln!(
+        out,
+        "\n  if logical were replaced by allocated: {}",
+        format_bytes(total_alloc)
+    )?;
+
+    inflated.sort_unstable_by_key(|(excess, _)| std::cmp::Reverse(*excess));
+    writeln!(out, "\nfiles reporting far more than they occupy:")?;
+    if inflated.is_empty() {
+        writeln!(out, "  none over 16 MiB")?;
+    }
+    for (excess, id) in inflated.iter().take(15) {
+        let node = index.node(*id);
+        writeln!(
+            out,
+            "  {:>12} over  ({} logical, {} on disk)  {}",
+            format_bytes(*excess),
+            format_bytes(node.size()),
+            format_bytes(node.allocated()),
+            index.path(*id)
+        )?;
     }
 
     Ok(())

@@ -306,7 +306,12 @@ impl EntrySink for IndexBuilder {
 
             self.parent_fs.push(entry.parent_id);
             if self.caps.has_stable_ids {
-                self.native_ids.push(entry.fs_id);
+                // The low 48 bits are the filesystem's own number. A scanner
+                // that emits several entries for one file — the names of a
+                // hard-linked file — distinguishes them in the high bits so
+                // each gets its own map slot, while every one of them still
+                // reports the single record they all describe.
+                self.native_ids.push(entry.fs_id & 0x0000_FFFF_FFFF_FFFF);
             }
             self.fs_to_node.insert(entry.fs_id, id);
 
