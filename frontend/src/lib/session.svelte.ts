@@ -10,6 +10,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import { selectionSummary, setQuery, setSort } from "./ipc";
 import type {
+  NodeRef,
   RawQueryDto,
   ScanTarget,
   SelectionSummaryDto,
@@ -62,6 +63,22 @@ export const session = $state({
   anchor: -1,
   allSelected: false,
   summary: null as SelectionSummaryDto | null,
+
+  // --- tree view (features.md §4) ---
+  /** Treemap drill point; null = all volumes in one map. */
+  drill: null as NodeRef | null,
+  /** The focused node, shared by the folder tree and the treemap. */
+  focus: null as NodeRef | null,
+  /** Bumped when focus changes from the treemap so the tree reveals it. */
+  revealEpoch: 0,
+  treemapDepth: 5,
+  colorMode: "type" as "type" | "folder",
+  /** Show logical size or size on disk as the primary number. The treemap's
+   *  geometry always uses allocated (features.md §4.2). */
+  sizeMode: "allocated" as "allocated" | "logical",
+  /** Extensions ticked in the type breakdown; dims the treemap and feeds the
+   *  list's extension filter. */
+  typeFilter: new SvelteSet<string>(),
 
   // --- scanning ---
   scanning: false,

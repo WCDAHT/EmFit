@@ -7,9 +7,12 @@
 //! live in `frontend/src/lib/types.ts` and must stay in step.
 
 use emfit_core::model::volume::VolumeInfo;
+use emfit_core::service::breakdown::TypeRow;
 use emfit_core::service::presets::Preset;
 use emfit_core::service::query::RawQuery;
 use emfit_core::service::task::Progress;
+use emfit_core::service::tree::TreeRow;
+use emfit_core::service::treemap::TreemapRect;
 use emfit_core::service::view::{Row, SelectionSummary, Sort, SortKey, human_size};
 use serde::{Deserialize, Serialize};
 
@@ -282,4 +285,135 @@ impl From<Preset> for PresetDto {
             search: p.search,
         }
     }
+}
+
+/// One folder-tree row (features.md §4.1).
+#[derive(Serialize, Debug, Clone)]
+pub struct TreeRowDto {
+    pub vol: u16,
+    pub id: u32,
+    pub name: String,
+    pub is_dir: bool,
+    pub synthetic: bool,
+    pub size: u64,
+    pub allocated: u64,
+    pub size_display: String,
+    pub allocated_display: String,
+    pub percent_of_parent: f32,
+    pub files: u32,
+    pub dirs: u32,
+    pub modified_display: String,
+    pub has_children: bool,
+}
+
+impl From<TreeRow> for TreeRowDto {
+    fn from(r: TreeRow) -> Self {
+        Self {
+            vol: r.vol,
+            id: r.id,
+            name: r.name,
+            is_dir: r.is_dir,
+            synthetic: r.synthetic,
+            size: r.size,
+            allocated: r.allocated,
+            size_display: r.size_display,
+            allocated_display: r.allocated_display,
+            percent_of_parent: r.percent_of_parent,
+            files: r.files,
+            dirs: r.dirs,
+            modified_display: r.modified_display,
+            has_children: r.has_children,
+        }
+    }
+}
+
+/// One treemap rectangle (features.md §4.2, §9 — layout computed in Rust).
+#[derive(Serialize, Debug, Clone)]
+pub struct TreemapRectDto {
+    pub vol: u16,
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub depth: u8,
+    pub is_dir: bool,
+    pub synthetic: bool,
+    pub category: u8,
+    pub branch: u16,
+    pub name: String,
+    pub size: u64,
+    pub allocated: u64,
+    pub size_display: String,
+    pub allocated_display: String,
+}
+
+impl From<TreemapRect> for TreemapRectDto {
+    fn from(r: TreemapRect) -> Self {
+        Self {
+            vol: r.vol,
+            id: r.id,
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: r.h,
+            depth: r.depth,
+            is_dir: r.is_dir,
+            synthetic: r.synthetic,
+            category: r.category,
+            branch: r.branch,
+            size_display: human_size(r.size),
+            allocated_display: human_size(r.allocated),
+            name: r.name,
+            size: r.size,
+            allocated: r.allocated,
+        }
+    }
+}
+
+/// Where the treemap is drilled to.
+#[derive(Deserialize, Debug, Clone, Copy)]
+pub struct DrillDto {
+    pub vol: u16,
+    pub id: u32,
+}
+
+/// One extension's share (features.md §4.3).
+#[derive(Serialize, Debug, Clone)]
+pub struct TypeRowDto {
+    pub extension: String,
+    pub kind_label: String,
+    pub category: u8,
+    pub count: u64,
+    pub size: u64,
+    pub allocated: u64,
+    pub size_display: String,
+    pub allocated_display: String,
+    pub percent: f32,
+}
+
+impl From<TypeRow> for TypeRowDto {
+    fn from(r: TypeRow) -> Self {
+        Self {
+            extension: r.extension,
+            kind_label: r.kind_label,
+            category: r.category,
+            count: r.count,
+            size: r.size,
+            allocated: r.allocated,
+            size_display: r.size_display,
+            allocated_display: r.allocated_display,
+            percent: r.percent,
+        }
+    }
+}
+
+/// Details for a hover tooltip / breadcrumb: fetched per node, on demand.
+#[derive(Serialize, Debug, Clone)]
+pub struct NodeInfoDto {
+    pub path: String,
+    pub size_display: String,
+    pub allocated_display: String,
+    pub files: u32,
+    pub dirs: u32,
 }

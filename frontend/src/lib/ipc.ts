@@ -7,12 +7,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  NodeInfoDto,
+  NodeRef,
   PresetDto,
   RawQueryDto,
   RowWindowDto,
   ScanTarget,
   SelectionSummaryDto,
   SortKey,
+  TreeRowDto,
+  TreemapRectDto,
+  TypeRowDto,
   VolumeDto,
 } from "./types";
 
@@ -91,4 +96,39 @@ export function selectionSummary(
 /** The `Filters.csv` presets (built-in, or the user's own file). */
 export function listPresets(): Promise<PresetDto[]> {
   return invoke("list_presets");
+}
+
+/** Folder-tree top level: one row per scanned volume. */
+export function treeRoots(): Promise<TreeRowDto[]> {
+  return invoke("tree_roots");
+}
+
+/** One directory's children, largest first (lazy CSR materialization). */
+export function treeChildren(vol: number, id: number): Promise<TreeRowDto[]> {
+  return invoke("tree_children", { vol, id });
+}
+
+/** Root-to-node id chain, for "reveal in tree". */
+export function nodeLineage(vol: number, id: number): Promise<number[]> {
+  return invoke("node_lineage", { vol, id });
+}
+
+/** The squarified treemap for this canvas and drill level, laid out in Rust. */
+export function treemapLayout(
+  drill: NodeRef | null,
+  width: number,
+  height: number,
+  depth: number,
+): Promise<TreemapRectDto[]> {
+  return invoke("treemap_layout", { drill, width, height, depth });
+}
+
+/** Aggregate every file by extension. */
+export function typeBreakdown(limit: number): Promise<TypeRowDto[]> {
+  return invoke("type_breakdown", { limit });
+}
+
+/** Tooltip / breadcrumb details for one node. */
+export function nodeInfo(vol: number, id: number): Promise<NodeInfoDto | null> {
+  return invoke("node_info", { vol, id });
 }

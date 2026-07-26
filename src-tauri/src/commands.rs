@@ -19,15 +19,20 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use emfit_core::model::index::NodeId;
 use emfit_core::service::config::Config;
 use emfit_core::service::query::Query;
 use emfit_core::service::task::{CancellationToken, Progress};
-use emfit_core::service::{elevation, presets, scan, search, view, volume};
+use emfit_core::service::treemap::TreemapOptions;
+use emfit_core::service::{
+    breakdown, elevation, presets, scan, search, tree, treemap, view, volume,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dto::{
-    PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto, ScanProgressDto, ScanTargetDto,
-    SelectionSummaryDto, SortDto, ViewUpdatedDto, VolumeDto,
+    DrillDto, NodeInfoDto, PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto, ScanProgressDto,
+    ScanTargetDto, SelectionSummaryDto, SortDto, TreeRowDto, TreemapRectDto, TypeRowDto,
+    ViewUpdatedDto, VolumeDto,
 };
 use crate::error::{CommandError, CommandResult};
 use crate::state::{AppState, ScannedVolume};
@@ -317,6 +322,104 @@ pub fn selection_summary(
 #[tauri::command]
 pub fn list_presets() -> Vec<PresetDto> {
     presets::load().into_iter().map(Into::into).collect()
+}
+
+// ---------------------------------------------------------------------------
+// space analysis (the Tree view tab — features.md §4)
+// ---------------------------------------------------------------------------
+
+/// The folder tree's top level: one row per scanned volume.
+#[tauri::command]
+pub fn tree_roots(state: State<'_, AppState>) -> Vec<TreeRowDto> {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+    tree::roots(&indices).into_iter().map(Into::into).collect()
+}
+
+/// One directory's children, largest first — lazy materialization from the
+/// CSR ranges, so expanding a 100k-child folder is one call.
+#[tauri::command]
+pub fn tree_children(state: State<'_, AppState>, vol: u16, id: u32) -> Vec<TreeRowDto> {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+    tree::children(&indices, vol, id)
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+/// Root-to-node id chain, for "reveal in tree".
+#[tauri::command]
+pub fn node_lineage(state: State<'_, AppState>, vol: u16, id: u32) -> Vec<u32> {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+    tree::lineage(&indices, vol, id)
+}
+
+/// The squarified treemap for the current canvas and drill level, computed
+/// in Rust and returned as a flat rectangle list (features.md §9).
+#[tauri::command]
+pub fn treemap_layout(
+    state: State<'_, AppState>,
+    drill: Option<DrillDto>,
+    width: f32,
+    height: f32,
+    depth: u8,
+) -> Vec<TreemapRectDto> {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+
+    let options = TreemapOptions {
+        width,
+        height,
+        max_depth: depth.clamp(1, 12),
+        ..TreemapOptions::default()
+    };
+    treemap::layout(&indices, drill.map(|d| (d.vol, d.id)), &options)
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+/// Aggregate every file by extension (features.md §4.3).
+#[tauri::command]
+pub fn type_breakdown(state: State<'_, AppState>, limit: usize) -> Vec<TypeRowDto> {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+    breakdown::by_extension(&indices, limit.clamp(10, 500))
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
+/// Tooltip / breadcrumb details for one node, fetched on demand so the
+/// treemap payload stays lean.
+#[tauri::command]
+pub fn node_info(state: State<'_, AppState>, vol: u16, id: u32) -> Option<NodeInfoDto> {
+    let inner = state.inner.lock().unwrap();
+    let index = inner.volumes.get(vol as usize)?.index.as_ref();
+    if (id as usize) >= index.len() {
+        return None;
+    }
+    let node_id = NodeId::new(id);
+    let node = index.node(node_id);
+    let (size, allocated) = if node.is_directory() {
+        (node.total_size(), node.total_allocated())
+    } else {
+        (node.size(), node.allocated())
+    };
+    Some(NodeInfoDto {
+        path: index.path(node_id),
+        size_display: view::human_size(size),
+        allocated_display: view::human_size(allocated),
+        files: node.file_count(),
+        dirs: node.dir_count(),
+    })
 }
 
 // ---------------------------------------------------------------------------

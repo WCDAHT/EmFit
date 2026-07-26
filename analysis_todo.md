@@ -37,12 +37,29 @@ goes stale.
 - Right-click on a row should open the real Explorer context menu
   (`IContextMenu`) — M4 scope, noted in the README.
 
-## M3 and later
+## M3 verification (needs a playtest)
 
-- [ ] Folder tree pane, treemap (layout in Rust, flat rectangle list over
-      IPC), file-type breakdown, top-N views.
-- [ ] Surface `VolumeScanOutcome::ads` in the row detail pane (data is
-      collected since M1; nothing displays it yet).
+- [ ] Playtest the Tree view on a real C: index. Exit criteria to eyeball:
+      treemap relayout feels instant at any drill (core budget is 100 ms),
+      expanding a 100k-child folder doesn't stall, tree totals agree with
+      the treemap and WizTree, free space + files ≈ volume capacity.
+- [ ] Update the README screenshot once both tabs have real data.
+
+## M3 gaps / follow-ups (small, known)
+
+- [ ] In-place filter box for the folder tree (features.md §4.1) — needs a
+      core subtree-filter; deferred, list search covers the need meanwhile.
+- [ ] Treemap right-click context menu (features.md §4.2) waits for the M4
+      file-operations work it would invoke.
+- [ ] Selection sync into the *List* tab (tree/map → list) — the tree and
+      map sync both ways today; the list keeps positional selection.
+- [ ] Treemap labels use a fixed 11px Inter; consider a token.
+
+## M4 and later
+
+- [ ] File operations, native `IContextMenu`, index updates after delete,
+      CSV/JSON export, row detail pane (surface `VolumeScanOutcome::ads`
+      there — collected since M1, still undisplayed).
 - [ ] Replace the placeholder app icon with real EmFit artwork
       (`app-icon.svg` at the repo root, then `npx tauri icon ./app-icon.svg`).
 

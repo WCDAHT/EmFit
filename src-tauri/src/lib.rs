@@ -95,7 +95,13 @@ pub fn run() {
             commands::set_sort,
             commands::get_rows,
             commands::selection_summary,
-            commands::list_presets
+            commands::list_presets,
+            commands::tree_roots,
+            commands::tree_children,
+            commands::node_lineage,
+            commands::treemap_layout,
+            commands::type_breakdown,
+            commands::node_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

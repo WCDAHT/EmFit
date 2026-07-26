@@ -48,16 +48,26 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
   window menu. Scan sources are managed from a popup (＋ to add a volume or
   a disk image, × to remove); all native disks are offered, only C: starts
   enabled.
-- **Two tabs**: *List* (search, above) and *Tree view*.
+- **Two tabs**: *List* (search, above) and *Tree view* — the WizTree half:
+  - a folder tree with inline proportional bars, percent-of-parent, subtree
+    counts, lazy expansion (100k-child folders open instantly), and keyboard
+    navigation;
+  - a **treemap** whose squarified layout is computed in Rust and painted on
+    a canvas — drill down (double-click), breadcrumb, hover tooltips, color
+    by file type (with legend) or by folder, adjustable depth, and free
+    space drawn as a block so the map accounts for the whole volume;
+  - a **file types** panel (what kind of thing is eating the disk); ticking
+    types dims the map and filters the list;
+  - **Top files / Top folders** shortcuts, and a logical-vs-on-disk size
+    switch. Selection is shared: click a rectangle and the tree reveals it,
+    and vice versa. Treemap geometry is always allocated bytes, so
+    hard-linked and sparse data is never drawn larger than it is.
 
 ### Coming next
 
-- **Tree view** (the WizTree half): the folder tree with proportional bars
-  and the treemap, layout computed in Rust — milestone **M3** (`0.3.0`).
-  The tab is present today as a placeholder.
 - **Native Explorer right-click menu** on rows (`IContextMenu`, like
-  WizTree), along with open/delete/copy-path operations — milestone **M4**
-  (`0.4.0`).
+  WizTree), along with open/delete/copy-path operations and export —
+  milestone **M4** (`0.4.0`).
 
 ## Keyboard shortcuts
 

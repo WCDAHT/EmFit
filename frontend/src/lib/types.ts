@@ -129,3 +129,69 @@ export interface ScanTarget {
   key: string;
   label: string;
 }
+
+/** One folder-tree row (mirror of `TreeRowDto`). */
+export interface TreeRowDto {
+  vol: number;
+  id: number;
+  name: string;
+  is_dir: boolean;
+  synthetic: boolean;
+  size: number;
+  allocated: number;
+  size_display: string;
+  allocated_display: string;
+  percent_of_parent: number;
+  files: number;
+  dirs: number;
+  modified_display: string;
+  has_children: boolean;
+}
+
+/** One treemap rectangle (mirror of `TreemapRectDto`). */
+export interface TreemapRectDto {
+  vol: number;
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  depth: number;
+  is_dir: boolean;
+  synthetic: boolean;
+  category: number;
+  branch: number;
+  name: string;
+  size: number;
+  allocated: number;
+  size_display: string;
+  allocated_display: string;
+}
+
+/** One extension's share (mirror of `TypeRowDto`). */
+export interface TypeRowDto {
+  extension: string;
+  kind_label: string;
+  category: number;
+  count: number;
+  size: number;
+  allocated: number;
+  size_display: string;
+  allocated_display: string;
+  percent: number;
+}
+
+/** Tooltip / breadcrumb details (mirror of `NodeInfoDto`). */
+export interface NodeInfoDto {
+  path: string;
+  size_display: string;
+  allocated_display: string;
+  files: number;
+  dirs: number;
+}
+
+/** A node handle: which volume slot, which node id. */
+export interface NodeRef {
+  vol: number;
+  id: number;
+}
