@@ -10,6 +10,7 @@ import type {
   PresetDto,
   RawQueryDto,
   RowWindowDto,
+  ScanTarget,
   SelectionSummaryDto,
   SortKey,
   VolumeDto,
@@ -47,10 +48,13 @@ export function relaunchElevated(): Promise<void> {
   return invoke("relaunch_elevated");
 }
 
-/** Scan the named volumes (display keys from {@link listVolumes}) in
- *  parallel. Progress arrives as `scan:progress` / `scan:done` events. */
-export function startScan(drives: string[]): Promise<void> {
-  return invoke("start_scan", { drives });
+/** Scan the given targets (volumes in parallel, then disk images).
+ *  Progress arrives as `scan:progress` / `scan:done` events keyed by
+ *  each target's `key`. */
+export function startScan(targets: ScanTarget[]): Promise<void> {
+  return invoke("start_scan", {
+    targets: targets.map(({ kind, key }) => ({ kind, key })),
+  });
 }
 
 /** Stop the running scan. */

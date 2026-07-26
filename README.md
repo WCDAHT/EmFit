@@ -44,6 +44,20 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
 - **Virtualized results list** — millions of rows scroll smoothly; only the
   visible window ever crosses from Rust to the UI. Sortable by any column,
   multi-select with Ctrl/Shift, live selection totals.
+- **Lean chrome** — no in-app header; File/View/Help live in the native
+  window menu. Scan sources are managed from a popup (＋ to add a volume or
+  a disk image, × to remove); all native disks are offered, only C: starts
+  enabled.
+- **Two tabs**: *List* (search, above) and *Tree view*.
+
+### Coming next
+
+- **Tree view** (the WizTree half): the folder tree with proportional bars
+  and the treemap, layout computed in Rust — milestone **M3** (`0.3.0`).
+  The tab is present today as a placeholder.
+- **Native Explorer right-click menu** on rows (`IContextMenu`, like
+  WizTree), along with open/delete/copy-path operations — milestone **M4**
+  (`0.4.0`).
 
 ## Keyboard shortcuts
 

@@ -14,6 +14,8 @@ mod state;
 use std::sync::Mutex;
 
 use emfit_core::service::{config::Config, logging};
+use tauri::Emitter;
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
 pub use error::CommandError;
 
@@ -47,6 +49,36 @@ pub fn run() {
         // permissions in `capabilities/default.json`. See STANDARDS Â§3.6.
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Native window menu instead of an in-app header — every pixel of the
+        // window belongs to the data. Items the webview must react to are
+        // forwarded as a `menu` event; the frontend switches on the id.
+        .setup(|app| {
+            let file = SubmenuBuilder::new(app, "File")
+                .text("sources", "Scan sources…")
+                .text("rescan", "Rescan\tF5")
+                .text("cancel_scan", "Cancel scan\tEsc")
+                .separator()
+                .text("exit", "Exit")
+                .build()?;
+            let view = SubmenuBuilder::new(app, "View")
+                .text("toggle_theme", "Toggle light/dark")
+                .build()?;
+            let help = SubmenuBuilder::new(app, "Help")
+                .text("shortcuts", "Keyboard shortcuts\tF1")
+                .text("about", "About EmFit")
+                .build()?;
+            let menu = MenuBuilder::new(app)
+                .items(&[&file, &view, &help])
+                .build()?;
+            app.set_menu(menu)?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "exit" => app.exit(0),
+            id => {
+                let _ = app.emit("menu", id.to_string());
+            }
+        })
         // Every app command the webview may call must be listed here. Unlike
         // plugin/core commands (gated by capabilities, Â§3.6), your own
         // commands need no permission entry â€” registering them is enough.

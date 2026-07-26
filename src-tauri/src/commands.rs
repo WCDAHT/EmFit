@@ -26,8 +26,8 @@ use emfit_core::service::{elevation, presets, scan, search, view, volume};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dto::{
-    PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto, ScanProgressDto, SelectionSummaryDto,
-    SortDto, ViewUpdatedDto, VolumeDto,
+    PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto, ScanProgressDto, ScanTargetDto,
+    SelectionSummaryDto, SortDto, ViewUpdatedDto, VolumeDto,
 };
 use crate::error::{CommandError, CommandResult};
 use crate::state::{AppState, ScannedVolume};
@@ -71,13 +71,14 @@ pub fn relaunch_elevated() -> CommandResult<()> {
     Ok(())
 }
 
-/// Scan the named volumes (display keys from [`list_volumes`]) in parallel.
-/// Returns immediately; progress and completion arrive as events.
+/// Scan the given targets — mounted volumes in parallel, then any disk
+/// images. Returns immediately; progress and completion arrive as events
+/// keyed by the target's `key`.
 #[tauri::command]
 pub fn start_scan(
     app: AppHandle,
     state: State<'_, AppState>,
-    drives: Vec<String>,
+    targets: Vec<ScanTargetDto>,
 ) -> CommandResult<()> {
     let cancel = {
         let mut inner = state.inner.lock().unwrap();
@@ -91,7 +92,7 @@ pub fn start_scan(
     };
 
     std::thread::spawn(move || {
-        run_scan_job(&app, &drives, &cancel);
+        run_scan_job(&app, &targets, &cancel);
 
         let state = app.state::<AppState>();
         let mut inner = state.inner.lock().unwrap();
@@ -107,73 +108,113 @@ pub fn start_scan(
 }
 
 /// The blocking part of a scan, on its worker thread.
-fn run_scan_job(app: &AppHandle, drives: &[String], cancel: &CancellationToken) {
-    let all = match volume::enumerate() {
-        Ok(all) => all,
-        Err(e) => {
-            for drive in drives {
-                emit_scan_done(app, drive, Some(&e.to_string()));
-            }
-            return;
-        }
-    };
+fn run_scan_job(app: &AppHandle, requested: &[ScanTargetDto], cancel: &CancellationToken) {
+    let (volume_keys, image_keys): (Vec<&ScanTargetDto>, Vec<&ScanTargetDto>) =
+        requested.iter().partition(|t| t.kind != "image");
 
+    // --- mounted volumes, in parallel ---
     let mut targets = Vec::new();
-    for drive in drives {
-        match all.iter().find(|v| &v.display_name() == drive) {
-            Some(info) => targets.push(info.clone()),
-            None => emit_scan_done(app, drive, Some("volume not found")),
+    if !volume_keys.is_empty() {
+        match volume::enumerate() {
+            Ok(all) => {
+                for target in &volume_keys {
+                    match all.iter().find(|v| v.display_name() == target.key) {
+                        Some(info) => targets.push(info.clone()),
+                        None => emit_scan_done(app, &target.key, Some("volume not found")),
+                    }
+                }
+            }
+            Err(e) => {
+                for target in &volume_keys {
+                    emit_scan_done(app, &target.key, Some(&e.to_string()));
+                }
+            }
         }
     }
-    if targets.is_empty() {
-        return;
-    }
-
-    let names: Vec<String> = targets.iter().map(|v| v.display_name()).collect();
-    let progress_app = app.clone();
-    let progress_names = names.clone();
-    let on_progress = move |slot: usize, progress: Progress| {
-        let _ = progress_app.emit(
-            "scan:progress",
-            ScanProgressDto {
-                volume: progress_names[slot].clone(),
-                progress: progress.into(),
-            },
-        );
-    };
 
     let options = scan::VolumeScanOptions::default();
-    let results = scan::scan_volumes(&targets, &options, &on_progress, cancel);
 
-    let state = app.state::<AppState>();
-    for (name, result) in names.iter().zip(results) {
-        match result {
-            Ok(outcome) => {
-                let root = outcome.index.node(outcome.index.root());
-                let done = ScanDoneDto {
-                    volume: name.clone(),
-                    ok: true,
-                    error: None,
-                    files: outcome.stats.files,
-                    directories: outcome.stats.directories,
-                    total_size: root.total_size(),
-                    total_display: view::human_size(root.total_size()),
-                    elapsed_ms: outcome.stats.elapsed.as_millis() as u64,
-                };
+    if !targets.is_empty() {
+        let names: Vec<String> = targets.iter().map(|v| v.display_name()).collect();
+        let progress_app = app.clone();
+        let progress_names = names.clone();
+        let on_progress = move |slot: usize, progress: Progress| {
+            let _ = progress_app.emit(
+                "scan:progress",
+                ScanProgressDto {
+                    volume: progress_names[slot].clone(),
+                    progress: progress.into(),
+                },
+            );
+        };
 
-                let mut inner = state.inner.lock().unwrap();
-                inner.volumes.retain(|v| &v.key != name);
-                inner.volumes.push(ScannedVolume {
-                    key: name.clone(),
-                    index: Arc::new(outcome.index),
-                    fold: outcome.fold,
-                });
-                drop(inner);
-
-                let _ = app.emit("scan:done", done);
-            }
-            Err(e) => emit_scan_done(app, name, Some(&e.to_string())),
+        let results = scan::scan_volumes(&targets, &options, &on_progress, cancel);
+        for (name, result) in names.iter().zip(results) {
+            install_outcome(app, name, result);
         }
+    }
+
+    // --- disk images, one after another (they share no disk with anything) ---
+    for target in image_keys {
+        if cancel.is_cancelled() {
+            emit_scan_done(app, &target.key, Some("operation cancelled"));
+            continue;
+        }
+        let key = target.key.clone();
+        let progress_app = app.clone();
+        let progress_key = key.clone();
+        let mut on_progress = move |progress: Progress| {
+            let _ = progress_app.emit(
+                "scan:progress",
+                ScanProgressDto {
+                    volume: progress_key.clone(),
+                    progress: progress.into(),
+                },
+            );
+        };
+        let result = scan::scan_image(
+            std::path::Path::new(&key),
+            &options,
+            &mut on_progress,
+            cancel,
+        );
+        install_outcome(app, &key, result);
+    }
+}
+
+/// Store a finished index under `key` and announce it, or announce the error.
+fn install_outcome(
+    app: &AppHandle,
+    key: &str,
+    result: emfit_core::error::Result<scan::VolumeScanOutcome>,
+) {
+    match result {
+        Ok(outcome) => {
+            let root = outcome.index.node(outcome.index.root());
+            let done = ScanDoneDto {
+                volume: key.to_string(),
+                ok: true,
+                error: None,
+                files: outcome.stats.files,
+                directories: outcome.stats.directories,
+                total_size: root.total_size(),
+                total_display: view::human_size(root.total_size()),
+                elapsed_ms: outcome.stats.elapsed.as_millis() as u64,
+            };
+
+            let state = app.state::<AppState>();
+            let mut inner = state.inner.lock().unwrap();
+            inner.volumes.retain(|v| v.key != key);
+            inner.volumes.push(ScannedVolume {
+                key: key.to_string(),
+                index: Arc::new(outcome.index),
+                fold: outcome.fold,
+            });
+            drop(inner);
+
+            let _ = app.emit("scan:done", done);
+        }
+        Err(e) => emit_scan_done(app, key, Some(&e.to_string())),
     }
 }
 

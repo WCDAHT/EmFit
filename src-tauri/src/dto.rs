@@ -104,6 +104,16 @@ impl VolumeDto {
     }
 }
 
+/// One thing to scan: a mounted volume by display key (`C:`) or a disk image
+/// by file path. The Sources popup builds a list of these.
+#[derive(Deserialize, Debug, Clone)]
+pub struct ScanTargetDto {
+    /// `"volume"` or `"image"`.
+    pub kind: String,
+    /// Volume display key, or the image file's full path.
+    pub key: String,
+}
+
 /// The webview's raw query strings, straight into [`RawQuery`]. Parsing and
 /// leniency live in the core (`service::query`); the shell just carries.
 #[derive(Deserialize, Debug, Clone, Default)]

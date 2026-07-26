@@ -121,3 +121,11 @@ export interface PresetDto {
   name: string;
   search: string;
 }
+
+/** One entry in the scan list: a mounted volume or a disk image file.
+ *  `kind`+`key` mirror the shell's `ScanTargetDto`; `label` is display-only. */
+export interface ScanTarget {
+  kind: "volume" | "image";
+  key: string;
+  label: string;
+}

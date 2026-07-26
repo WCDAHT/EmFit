@@ -11,6 +11,7 @@ import { SvelteSet } from "svelte/reactivity";
 import { selectionSummary, setQuery, setSort } from "./ipc";
 import type {
   RawQueryDto,
+  ScanTarget,
   SelectionSummaryDto,
   SortKey,
   VolumeDto,
@@ -28,6 +29,9 @@ export interface VolumeScanState {
 }
 
 export const session = $state({
+  // --- which tab is showing ---
+  tab: "list" as "list" | "tree",
+
   // --- query inputs (what the search UI holds) ---
   text: "",
   regex: "",
@@ -62,10 +66,24 @@ export const session = $state({
   // --- scanning ---
   scanning: false,
   volumes: [] as VolumeDto[],
-  checked: new SvelteSet<string>(),
+  /** The scan list the Sources popup manages: volumes and disk images. */
+  targets: [] as ScanTarget[],
+  sourcesOpen: false,
   scan: {} as Record<string, VolumeScanState>,
   elevated: true,
 });
+
+/** Add to the scan list (no duplicates). */
+export function addTarget(target: ScanTarget) {
+  if (!session.targets.some((t) => t.key === target.key)) {
+    session.targets.push(target);
+  }
+}
+
+export function removeTarget(key: string) {
+  session.targets = session.targets.filter((t) => t.key !== key);
+  delete session.scan[key];
+}
 
 /** Imperative hooks views register so root-level shortcuts can reach them
  *  (STANDARDS §3.7: all shortcuts dispatched from the app root). */

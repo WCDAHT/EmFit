@@ -1,22 +1,25 @@
 <!--
-  App.svelte — root view: scan controls, search, the virtualized result list,
-  and the status bar. First usable milestone (roadmap M2).
+  App.svelte — root view. No in-app header: chrome lives in the native window
+  menu (built in src-tauri/src/lib.rs), so every pixel below the menu bar
+  belongs to the data. Two tabs: List (search) and Tree view (the M3
+  space-analysis pane, placeholder until then).
 
   All keyboard shortcuts dispatch from here (STANDARDS §3.7), and all Tauri
-  events are subscribed here once and projected into the shared session
-  state — child views read the session, they don't own copies.
+  events — scan progress, view updates, native menu clicks — are subscribed
+  here once and projected into the shared session state.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import Icon from "./lib/components/Icon.svelte";
   import About from "./lib/components/About.svelte";
   import ShortcutsDialog from "./lib/components/ShortcutsDialog.svelte";
-  import ScanBar from "./lib/views/ScanBar.svelte";
+  import ScanControls from "./lib/views/ScanControls.svelte";
+  import ScanStatus from "./lib/views/ScanStatus.svelte";
   import SearchBar from "./lib/views/SearchBar.svelte";
   import FileList from "./lib/views/FileList.svelte";
+  import TreeView from "./lib/views/TreeView.svelte";
   import StatusBar from "./lib/views/StatusBar.svelte";
-  import { toggleThemeMode, getThemeMode, syncThemeWithConfig, type ThemeMode } from "./lib/theme";
+  import { toggleThemeMode, syncThemeWithConfig } from "./lib/theme";
   import { cancelScan, listVolumes } from "./lib/ipc";
   import {
     session,
@@ -27,7 +30,6 @@
   } from "./lib/session.svelte";
   import type { ScanDoneEvent, ScanProgressEvent, ViewUpdatedEvent } from "./lib/types";
 
-  let theme = $state<ThemeMode>(getThemeMode());
   let aboutOpen = $state(false);
   let shortcutsOpen = $state(false);
 
@@ -79,10 +81,34 @@
         // The result set changed under the selection; positions are stale.
         clearSelection();
       }),
+
+      // Native menu clicks arrive as ids (see lib.rs).
+      listen<string>("menu", ({ payload }) => {
+        switch (payload) {
+          case "sources":
+            session.sourcesOpen = true;
+            break;
+          case "rescan":
+            if (!session.scanning) hooks.rescan?.();
+            break;
+          case "cancel_scan":
+            void cancelScan();
+            break;
+          case "toggle_theme":
+            toggleThemeMode();
+            break;
+          case "shortcuts":
+            shortcutsOpen = true;
+            break;
+          case "about":
+            aboutOpen = true;
+            break;
+        }
+      }),
     ];
 
     // Reconcile the first-paint theme cache with the durable config.
-    void syncThemeWithConfig().then((mode) => (theme = mode));
+    void syncThemeWithConfig();
 
     return () => {
       for (const p of unlisteners) void p.then((unlisten) => unlisten());
@@ -113,6 +139,7 @@
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
+      session.tab = "list";
       hooks.focusSearch?.();
       return;
     }
@@ -122,7 +149,9 @@
       return;
     }
     if (e.key === "Escape") {
-      if (session.scanning) {
+      if (session.sourcesOpen) {
+        session.sourcesOpen = false;
+      } else if (session.scanning) {
         void cancelScan();
       } else if (session.text !== "") {
         session.text = "";
@@ -137,32 +166,36 @@
 <svelte:window onkeydown={onKeydown} />
 
 <main>
-  <header class="titlebar">
-    <h1>EmFit</h1>
-    <div class="actions">
+  <div class="topbar">
+    <nav class="tabs" aria-label="Views">
       <button
-        class="icon-btn"
-        title="Toggle light/dark"
-        onclick={() => (theme = toggleThemeMode())}
+        class="tab"
+        class:active={session.tab === "list"}
+        onclick={() => (session.tab = "list")}
       >
-        <Icon name={theme === "light" ? "moon" : "sun"} />
+        List
       </button>
       <button
-        class="icon-btn"
-        title="Keyboard shortcuts (F1)"
-        onclick={() => (shortcutsOpen = true)}
+        class="tab"
+        class:active={session.tab === "tree"}
+        onclick={() => (session.tab = "tree")}
       >
-        <Icon name="keyboard" />
+        Tree view
       </button>
-      <button class="icon-btn" title="About EmFit" onclick={() => (aboutOpen = true)}>
-        <Icon name="info-circle" />
-      </button>
-    </div>
-  </header>
+    </nav>
+    <div class="spacer"></div>
+    <ScanControls />
+  </div>
 
-  <ScanBar />
-  <SearchBar />
-  <FileList />
+  <ScanStatus />
+
+  {#if session.tab === "list"}
+    <SearchBar />
+    <FileList />
+  {:else}
+    <TreeView />
+  {/if}
+
   <StatusBar />
 </main>
 
@@ -174,42 +207,44 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: var(--space-3) var(--space-3) 0;
+    padding: var(--space-2) var(--space-2) 0;
     gap: var(--space-2);
   }
 
-  .titlebar {
+  .topbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: var(--space-3);
   }
 
-  h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-primary);
+  .spacer {
+    flex: 1;
   }
 
-  .actions {
+  .tabs {
     display: flex;
-    align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-1);
   }
 
-  .icon-btn {
-    display: grid;
-    place-items: center;
-    width: var(--button-height);
+  .tab {
     height: var(--button-height);
-    border: 1px solid var(--border);
+    padding: 0 var(--space-4);
+    border: 1px solid transparent;
     border-radius: var(--radius-small);
-    background: var(--surface-raised);
+    background: none;
     color: var(--text-secondary);
+    font-family: inherit;
+    font-size: var(--font-size-body);
     cursor: pointer;
   }
-  .icon-btn:hover {
+  .tab:hover {
     color: var(--text-primary);
     background: var(--surface-hover);
+  }
+  .tab.active {
+    border-color: var(--border-strong);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
   }
 </style>

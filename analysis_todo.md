@@ -25,6 +25,18 @@ goes stale.
       hit for the duration of the sort); fine for filtered views, measure on
       a full 5M-row sort before M3.
 
+## UI direction settled with the user (2026-07-26)
+
+- No in-app header; native window menu (File / View / Help) carries About,
+  shortcuts, theme, sources, rescan, exit.
+- Scan sources = managed list in a popup (＋/× model, all native volumes
+  offered, only C: auto-added; "Add disk image…" via the native file
+  dialog feeds `scan_image`).
+- Two tabs: List (search) and Tree view; Tree view ships in M3 and is a
+  placeholder until then.
+- Right-click on a row should open the real Explorer context menu
+  (`IContextMenu`) — M4 scope, noted in the README.
+
 ## M3 and later
 
 - [ ] Folder tree pane, treemap (layout in Rust, flat rectangle list over
