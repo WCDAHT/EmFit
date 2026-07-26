@@ -18,13 +18,13 @@
   let { open, onClose }: Props = $props();
 
   const SHORTCUTS: { keys: string; action: string }[] = [
+    { keys: "Ctrl + F", action: "Focus the search box" },
+    { keys: "F5", action: "Rescan the selected drives" },
+    { keys: "Esc", action: "Cancel scan / clear search / clear selection" },
+    { keys: "Ctrl + A", action: "Select all results" },
+    { keys: "Ctrl + Click", action: "Toggle a row in the selection" },
+    { keys: "Shift + Click", action: "Select a range of rows" },
     { keys: "F1", action: "Show this shortcuts list" },
-    { keys: "Esc", action: "Close dialog" },
-    // Standard set to wire as the matching views land (STANDARDS §3.7):
-    // { keys: "Ctrl + O", action: "Open" },
-    // { keys: "Ctrl + S", action: "Save" },
-    // { keys: "Ctrl + F", action: "Find" },
-    // { keys: "Delete", action: "Remove selection" },
   ];
 
   function onKeydown(e: KeyboardEvent) {

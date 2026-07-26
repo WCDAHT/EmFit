@@ -26,6 +26,8 @@ thiserror = "2"
 anyhow = "1"
 # Parallel MFT record parsing (roadmap M1: "rayon across the buffer").
 rayon = "1"
+# The search's regex filter field (roadmap M2, features.md §2).
+regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # File logging: daily-rotating appender with N-file retention (STANDARDS Â§4.2).

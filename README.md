@@ -25,8 +25,25 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
 
 ## Features
 
-- ...
-- ...
+- **Fast NTFS scan** — reads the MFT directly (physical-drive mode with a
+  volume-handle fallback), in parallel across drives, with live progress,
+  a working Cancel, and per-drive failure isolation.
+- **Instant search** across every scanned volume: substrings, wildcards
+  (`*.pdf`, `draft*`, `n?tes`), semicolon-OR terms, backtick path scoping
+  (`` `C:\Users` report ``), a regex field, and size / date / extension
+  filters — inline (`ext:iso size:>1gb dm:2024-01-01..`) or as fields.
+- **Preset filters** in Everything's `Filters.csv` format (Audio, Video,
+  Documents, …); drop your own `Filters.csv` next to the config to replace
+  them.
+- **Case folding the volume's way** — name matching uses the volume's own
+  NTFS `$Upcase` table, not a global rule.
+- **Honest accounting**: hard links are listed under every name but their
+  bytes count once; alternate data streams count toward their owner's size
+  on disk; free space is a first-class row; reparse points are flagged and
+  never followed.
+- **Virtualized results list** — millions of rows scroll smoothly; only the
+  visible window ever crosses from Rust to the UI. Sortable by any column,
+  multi-select with Ctrl/Shift, live selection totals.
 
 ## Keyboard shortcuts
 

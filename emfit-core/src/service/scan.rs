@@ -26,11 +26,14 @@ use crate::model::entry::{EntryFlags, RawEntry, Times};
 use crate::model::index::Index;
 use crate::model::sink::{EntrySink, ScanWarning};
 use crate::model::volume::VolumeInfo;
-use crate::parser::block::{BlockSource, FileBlockSource};
+use crate::parser::block::{AlignedBuf, BlockSource, FileBlockSource};
+use crate::parser::ntfs::attr::AttributeType;
 use crate::parser::ntfs::bootstrap::{self, MftLayout};
+use crate::parser::ntfs::record::Record;
 use crate::parser::ntfs::scanner::{AdsStream, ROOT_RECORD, ScanOptions, ScanStats};
-use crate::parser::ntfs::{retrieval, scanner};
+use crate::parser::ntfs::{bitmap, retrieval, scanner};
 use crate::service::benchlog;
+use crate::service::fold::CaseFold;
 use crate::service::task::{CancellationToken, Progress};
 
 /// The synthetic id the free-space row is pushed under. All ones — no real
@@ -94,6 +97,10 @@ pub struct VolumeScanOutcome {
     pub ads: Vec<AdsStream>,
     /// How the bytes were actually read.
     pub mode: AccessMode,
+    /// The volume's case-folding rule, from `$UpCase` when it was readable —
+    /// search compares names with this, not with a global rule
+    /// (features.md §2).
+    pub fold: CaseFold,
 }
 
 /// The capabilities an NTFS volume has. One place, so the UI, search, and the
@@ -343,6 +350,16 @@ fn run_scan(
         return Err(Error::Cancelled);
     }
 
+    // The volume's own case table, so search compares names the way the
+    // filesystem does. Missing or unreadable degrades to the simple rule.
+    let fold = match read_upcase(source, layout) {
+        Some(table) => CaseFold::from_upcase(table),
+        None => {
+            tracing::debug!("$UpCase not read; folding with the simple rule");
+            CaseFold::Simple
+        }
+    };
+
     // Free space as a first-class row (features.md §1.3): without it the
     // treemap under-accounts the volume and "used plus free" never adds up.
     // Synthetic, so exports and the UI can disclose it is not a real file.
@@ -369,7 +386,59 @@ fn run_scan(
         stats: outcome.stats,
         ads: outcome.ads,
         mode,
+        fold,
     })
+}
+
+/// MFT record 10 is `$UpCase`: 128 KiB mapping every UTF-16 code unit to its
+/// uppercase form — the table the filesystem itself compares names with.
+const UPCASE_RECORD: u64 = 10;
+
+/// Read `$UpCase` off the volume. `None` on any problem: folding then falls
+/// back to the simple rule, which costs accuracy on exotic characters, not
+/// correctness.
+fn read_upcase(source: &dyn BlockSource, layout: &MftLayout) -> Option<Vec<u16>> {
+    let location = layout.extents.locate(UPCASE_RECORD)?;
+    let record_size = layout.boot.bytes_per_record as usize;
+
+    // The record's offset is record-aligned, not necessarily sector-aligned
+    // (1 KiB records on a 4Kn disk); read the surrounding aligned window.
+    let sector = u64::from(source.sector_size());
+    let start = location.byte_offset / sector * sector;
+    let lead = (location.byte_offset - start) as usize;
+    let span = (lead + record_size).div_ceil(sector as usize) * sector as usize;
+
+    let mut buf = AlignedBuf::for_source(source, span);
+    source.read_exact_at(start, buf.as_mut_slice()).ok()?;
+    let record_bytes = &mut buf.as_mut_slice()[lead..lead + record_size];
+
+    let record = Record::parse(record_bytes, layout.boot.bytes_per_sector).ok()?;
+    if !record.is_in_use() {
+        return None;
+    }
+
+    for attribute in record.attributes() {
+        if attribute.kind() != AttributeType::Data || !attribute.is_unnamed() {
+            continue;
+        }
+        let bytes = if let Some(nr) = attribute.non_resident() {
+            bitmap::read_non_resident(
+                source,
+                &nr.data_runs(),
+                layout.boot.bytes_per_cluster,
+                nr.data_size(),
+            )
+            .ok()?
+        } else {
+            attribute.resident_value()?.to_vec()
+        };
+        let table: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        return Some(table);
+    }
+    None
 }
 
 /// Record the scan in the BenchLog (STANDARDS §5.5). Best-effort: a failure

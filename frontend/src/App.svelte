@@ -1,44 +1,135 @@
 <!--
-  App.svelte â€” root view. The Tauri/Svelte successor to main.slint.
+  App.svelte — root view: scan controls, search, the virtualized result list,
+  and the status bar. First usable milestone (roadmap M2).
 
-  Replace the body with your first real view (put screen-level views under
-  src/lib/views/, reusable pieces under src/lib/components/; see STANDARDS
-  Â§3.1). The title bar, theme toggle, and About dialog wiring below are the
-  template's worked example of the conventions.
+  All keyboard shortcuts dispatch from here (STANDARDS §3.7), and all Tauri
+  events are subscribed here once and projected into the shared session
+  state — child views read the session, they don't own copies.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import Icon from "./lib/components/Icon.svelte";
   import About from "./lib/components/About.svelte";
   import ShortcutsDialog from "./lib/components/ShortcutsDialog.svelte";
+  import ScanBar from "./lib/views/ScanBar.svelte";
+  import SearchBar from "./lib/views/SearchBar.svelte";
+  import FileList from "./lib/views/FileList.svelte";
+  import StatusBar from "./lib/views/StatusBar.svelte";
   import { toggleThemeMode, getThemeMode, syncThemeWithConfig, type ThemeMode } from "./lib/theme";
-  import { greet } from "./lib/ipc";
+  import { cancelScan, listVolumes } from "./lib/ipc";
+  import {
+    session,
+    hooks,
+    queryChanged,
+    clearSelection,
+    selectAll,
+  } from "./lib/session.svelte";
+  import type { ScanDoneEvent, ScanProgressEvent, ViewUpdatedEvent } from "./lib/types";
 
   let theme = $state<ThemeMode>(getThemeMode());
   let aboutOpen = $state(false);
   let shortcutsOpen = $state(false);
-  let bridgeResult = $state("");
 
-  // First paint used the localStorage cache; reconcile with the durable theme
-  // in the backend config now that async IPC is available (STANDARDS Â§3.3).
-  onMount(async () => {
-    theme = await syncThemeWithConfig();
+  onMount(() => {
+    const unlisteners: Promise<UnlistenFn>[] = [
+      listen<ScanProgressEvent>("scan:progress", ({ payload }) => {
+        const s = session.scan[payload.volume];
+        if (!s) return;
+        if (payload.kind === "Started") {
+          s.message = payload.message;
+          s.total = payload.total;
+        } else if (payload.kind === "Tick") {
+          s.done = payload.done;
+        } else if (payload.kind === "Failed") {
+          s.phase = "error";
+          s.error = payload.message;
+        }
+      }),
+
+      listen<ScanDoneEvent>("scan:done", async ({ payload }) => {
+        session.scan[payload.volume] = payload.ok
+          ? {
+              phase: "done",
+              message: "",
+              done: 0,
+              total: null,
+              summary: `${payload.files.toLocaleString()} files, ${payload.total_display} in ${(payload.elapsed_ms / 1000).toFixed(1)}s`,
+            }
+          : {
+              phase: "error",
+              message: "",
+              done: 0,
+              total: null,
+              error: payload.error ?? "failed",
+            };
+
+        const anyRunning = Object.values(session.scan).some((s) => s.phase === "scanning");
+        if (!anyRunning) session.scanning = false;
+        session.volumes = await listVolumes();
+      }),
+
+      listen<ViewUpdatedEvent>("view:updated", ({ payload }) => {
+        session.generation = payload.generation;
+        session.total = payload.total;
+        session.elapsedMs = payload.elapsed_ms;
+        session.warnings = payload.warnings;
+        session.volumesTotalDisplay = payload.volumes_total_display;
+        session.viewEpoch += 1;
+        // The result set changed under the selection; positions are stale.
+        clearSelection();
+      }),
+    ];
+
+    // Reconcile the first-paint theme cache with the durable config.
+    void syncThemeWithConfig().then((mode) => (theme = mode));
+
+    return () => {
+      for (const p of unlisteners) void p.then((unlisten) => unlisten());
+    };
   });
 
-  async function testBridge() {
-    // Demonstrates the typed IPC layer calling into the Rust core.
-    bridgeResult = await greet("EmFit");
+  function inTextInput(e: KeyboardEvent): boolean {
+    const t = e.target as HTMLElement | null;
+    return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   }
 
-  // All app shortcuts are dispatched here at the root (STANDARDS Â§3.7), not
-  // sprinkled through children. Open dialogs own their own Esc-to-close, so we
-  // suppress the global shortcuts while one is up. Add app shortcuts (Ctrl+O,
-  // Ctrl+S, â€¦) here as the views that need them land.
+  // All app shortcuts, dispatched at the root (STANDARDS §3.7). Open dialogs
+  // own their own Esc; global handling is suppressed while one is up.
   function onKeydown(e: KeyboardEvent) {
     const dialogOpen = aboutOpen || shortcutsOpen;
+
     if (e.key === "F1") {
       e.preventDefault();
       if (!dialogOpen) shortcutsOpen = true;
+      return;
+    }
+    if (dialogOpen) return;
+
+    if (e.key === "F5") {
+      e.preventDefault();
+      if (!session.scanning) hooks.rescan?.();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      hooks.focusSearch?.();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && !inTextInput(e)) {
+      e.preventDefault();
+      selectAll();
+      return;
+    }
+    if (e.key === "Escape") {
+      if (session.scanning) {
+        void cancelScan();
+      } else if (session.text !== "") {
+        session.text = "";
+        queryChanged(true);
+      } else {
+        clearSelection();
+      }
     }
   }
 </script>
@@ -63,20 +154,16 @@
       >
         <Icon name="keyboard" />
       </button>
-      <button class="btn" onclick={() => (aboutOpen = true)}>About</button>
+      <button class="icon-btn" title="About EmFit" onclick={() => (aboutOpen = true)}>
+        <Icon name="info-circle" />
+      </button>
     </div>
   </header>
 
-  <section class="body">
-    <p class="hint">
-      Replace this view with your first screen. See STANDARDS Â§3.1.
-    </p>
-
-    <button class="btn primary" onclick={testBridge}>Test shellâ†”core bridge</button>
-    {#if bridgeResult}
-      <p class="result">{bridgeResult}</p>
-    {/if}
-  </section>
+  <ScanBar />
+  <SearchBar />
+  <FileList />
+  <StatusBar />
 </main>
 
 <About open={aboutOpen} onClose={() => (aboutOpen = false)} />
@@ -87,8 +174,8 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: var(--space-5);
-    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3) 0;
+    gap: var(--space-2);
   }
 
   .titlebar {
@@ -99,7 +186,7 @@
 
   h1 {
     margin: 0;
-    font-size: var(--font-size-title);
+    font-size: var(--font-size-heading);
     font-weight: var(--font-weight-semibold);
     color: var(--text-primary);
   }
@@ -108,51 +195,6 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-  }
-
-  .body {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    align-items: flex-start;
-  }
-
-  .hint {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
-  .result {
-    margin: 0;
-    color: var(--positive);
-  }
-
-  /* Buttons are hand-styled here only to demonstrate the tokens. Real apps
-   * should factor a Button.svelte component on the second use (STANDARDS Â§3.1)
-   * and prefer native <button> semantics for focus/keyboard behavior. */
-  .btn {
-    height: var(--button-height);
-    padding: 0 var(--space-3);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-small);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: var(--font-size-body);
-    cursor: pointer;
-  }
-  .btn:hover {
-    background: var(--surface-hover);
-  }
-  .btn.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text-on-accent);
-    font-weight: var(--font-weight-semibold);
-  }
-  .btn.primary:hover {
-    background: var(--accent-hover);
   }
 
   .icon-btn {

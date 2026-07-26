@@ -19,6 +19,8 @@ tracing-appender = { workspace = true }
 chrono = { workspace = true }
 # The MFT sweep parses each read chunk across threads (parser::ntfs::scanner).
 rayon = { workspace = true }
+# Search's regex filter field (service::query).
+regex = { workspace = true }
 
 # Volume discovery and elevation checks. Windows-only by design: the rest of
 # the core — including raw device reads — runs on `std` alone, so Linux and

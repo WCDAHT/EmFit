@@ -1,46 +1,377 @@
 //! `#[tauri::command]` functions: the webview's only entry into Rust.
 //!
-//! These are the Tauri analogue of the old Slint callback wiring. Per
-//! STANDARDS Â§3.4 they stay *thin*: parse/validate arguments, call into
+//! Per STANDARDS §3.4 these stay *thin*: parse/validate arguments, call into
 //! `emfit-core`, map the result to a `Serialize` type or `CommandError`.
-//! No business logic lives here â€” if a command grows past a few lines of
-//! glue, the logic belongs in a core `service`.
+//! Long work (scanning, searching, sorting) runs on worker threads that hold
+//! clones of the shared state; results come back to the webview as events:
+//!
+//! - `scan:progress` — [`ScanProgressDto`], throttled by the core sweep
+//! - `scan:done`     — [`ScanDoneDto`], one per volume
+//! - `view:updated`  — [`ViewUpdatedDto`], after every completed query/sort
+//!
+//! The row-window contract (features.md §9): the index never crosses IPC.
+//! The webview calls [`get_rows`] for the window its viewport shows, and
+//! nothing more.
 //!
 //! Every command added here must be listed in `tauri::generate_handler![...]`
-//! in `lib.rs` â€” that alone makes it invokable. App commands need NO capability
-//! entry; `capabilities/default.json` (Â§3.6) gates only plugin/core commands.
-//!
-//! A typed wrapper for each command lives on the frontend in
-//! `src/lib/ipc.ts`, so the rest of the Svelte code never touches the raw
-//! `invoke()` string name.
+//! in `lib.rs`. A typed wrapper for each lives in `frontend/src/lib/ipc.ts`.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use emfit_core::service::config::Config;
-use tauri::State;
+use emfit_core::service::query::Query;
+use emfit_core::service::task::{CancellationToken, Progress};
+use emfit_core::service::{elevation, presets, scan, search, view, volume};
+use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::error::CommandResult;
+use crate::dto::{
+    PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto, ScanProgressDto, SelectionSummaryDto,
+    SortDto, ViewUpdatedDto, VolumeDto,
+};
+use crate::error::{CommandError, CommandResult};
+use crate::state::{AppState, ScannedVolume};
 
-/// Canonical "hello world" command demonstrating the shellâ†”core bridge.
-///
-/// Replace with real commands as the app grows. The shape to copy:
-/// take serde-deserializable args, return a `CommandResult<T>` where `T:
-/// Serialize`, and delegate the actual work to a core service.
+/// The most rows one window may request. The viewport shows a few dozen;
+/// anything larger is a bug or an attempt to ship the index across IPC.
+const MAX_WINDOW: u64 = 512;
+
+// ---------------------------------------------------------------------------
+// volumes & scanning
+// ---------------------------------------------------------------------------
+
+/// Every volume on the machine, flagged with whether it is scannable and
+/// whether an index is currently loaded.
 #[tauri::command]
-pub fn greet(name: &str) -> CommandResult<String> {
-    tracing::info!(name, "greet called");
-    Ok(format!("Hello, {name}! The shellâ†”core bridge works."))
+pub fn list_volumes(state: State<'_, AppState>) -> CommandResult<Vec<VolumeDto>> {
+    let volumes = volume::enumerate()?;
+    let inner = state.inner.lock().unwrap();
+    Ok(volumes
+        .iter()
+        .map(|info| {
+            let scanned = inner
+                .volumes
+                .iter()
+                .any(|scanned| scanned.key == info.display_name());
+            VolumeDto::from_info(info, scanned)
+        })
+        .collect())
 }
 
-/// Emit a log line that originated in the webview into the Rust `tracing`
-/// pipeline, so frontend and backend logs share one file and one format (the
-/// webview has no log file of its own). The frontend console bridge
-/// (`src/lib/log.ts`) calls this for every `console.*`, giving a single
-/// traceable chain of actions.
+/// Whether the process can open raw volumes (Administrator).
+#[tauri::command]
+pub fn elevation_status() -> bool {
+    elevation::is_elevated()
+}
+
+/// The one-click fix when it can't (features.md §1.1).
+#[tauri::command]
+pub fn relaunch_elevated() -> CommandResult<()> {
+    elevation::relaunch_elevated()?;
+    Ok(())
+}
+
+/// Scan the named volumes (display keys from [`list_volumes`]) in parallel.
+/// Returns immediately; progress and completion arrive as events.
+#[tauri::command]
+pub fn start_scan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    drives: Vec<String>,
+) -> CommandResult<()> {
+    let cancel = {
+        let mut inner = state.inner.lock().unwrap();
+        if inner.scanning {
+            return Err(CommandError::Shell("a scan is already running".into()));
+        }
+        let cancel = CancellationToken::new();
+        inner.scanning = true;
+        inner.scan_cancel = Some(cancel.clone());
+        cancel
+    };
+
+    std::thread::spawn(move || {
+        run_scan_job(&app, &drives, &cancel);
+
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
+        inner.scanning = false;
+        inner.scan_cancel = None;
+        drop(inner);
+
+        // The result set changed; whatever query is active runs against the
+        // new indexes.
+        requery(&app, false);
+    });
+    Ok(())
+}
+
+/// The blocking part of a scan, on its worker thread.
+fn run_scan_job(app: &AppHandle, drives: &[String], cancel: &CancellationToken) {
+    let all = match volume::enumerate() {
+        Ok(all) => all,
+        Err(e) => {
+            for drive in drives {
+                emit_scan_done(app, drive, Some(&e.to_string()));
+            }
+            return;
+        }
+    };
+
+    let mut targets = Vec::new();
+    for drive in drives {
+        match all.iter().find(|v| &v.display_name() == drive) {
+            Some(info) => targets.push(info.clone()),
+            None => emit_scan_done(app, drive, Some("volume not found")),
+        }
+    }
+    if targets.is_empty() {
+        return;
+    }
+
+    let names: Vec<String> = targets.iter().map(|v| v.display_name()).collect();
+    let progress_app = app.clone();
+    let progress_names = names.clone();
+    let on_progress = move |slot: usize, progress: Progress| {
+        let _ = progress_app.emit(
+            "scan:progress",
+            ScanProgressDto {
+                volume: progress_names[slot].clone(),
+                progress: progress.into(),
+            },
+        );
+    };
+
+    let options = scan::VolumeScanOptions::default();
+    let results = scan::scan_volumes(&targets, &options, &on_progress, cancel);
+
+    let state = app.state::<AppState>();
+    for (name, result) in names.iter().zip(results) {
+        match result {
+            Ok(outcome) => {
+                let root = outcome.index.node(outcome.index.root());
+                let done = ScanDoneDto {
+                    volume: name.clone(),
+                    ok: true,
+                    error: None,
+                    files: outcome.stats.files,
+                    directories: outcome.stats.directories,
+                    total_size: root.total_size(),
+                    total_display: view::human_size(root.total_size()),
+                    elapsed_ms: outcome.stats.elapsed.as_millis() as u64,
+                };
+
+                let mut inner = state.inner.lock().unwrap();
+                inner.volumes.retain(|v| &v.key != name);
+                inner.volumes.push(ScannedVolume {
+                    key: name.clone(),
+                    index: Arc::new(outcome.index),
+                    fold: outcome.fold,
+                });
+                drop(inner);
+
+                let _ = app.emit("scan:done", done);
+            }
+            Err(e) => emit_scan_done(app, name, Some(&e.to_string())),
+        }
+    }
+}
+
+fn emit_scan_done(app: &AppHandle, volume: &str, error: Option<&str>) {
+    let _ = app.emit(
+        "scan:done",
+        ScanDoneDto {
+            volume: volume.to_string(),
+            ok: error.is_none(),
+            error: error.map(str::to_string),
+            files: 0,
+            directories: 0,
+            total_size: 0,
+            total_display: String::new(),
+            elapsed_ms: 0,
+        },
+    );
+}
+
+/// Stop the running scan. The core checks the token every chunk, so this
+/// lands within a fraction of a second.
+#[tauri::command]
+pub fn cancel_scan(state: State<'_, AppState>) {
+    let inner = state.inner.lock().unwrap();
+    if let Some(cancel) = &inner.scan_cancel {
+        cancel.cancel();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// query, sort, rows
+// ---------------------------------------------------------------------------
+
+/// Replace the active query. Returns immediately; a `view:updated` event
+/// follows when the (interruptible) search completes.
+#[tauri::command]
+pub fn set_query(app: AppHandle, state: State<'_, AppState>, raw: RawQueryDto) {
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.view.raw = raw.into();
+    }
+    requery(&app, false);
+}
+
+/// Change the sort order. Re-sorts the current hits without re-filtering
+/// (features.md §3: stable, cached sort).
+#[tauri::command]
+pub fn set_sort(app: AppHandle, state: State<'_, AppState>, sort: SortDto) {
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.view.sort = sort.to_sort();
+    }
+    requery(&app, true);
+}
+
+/// One window of the current view: pre-formatted rows for the viewport.
+#[tauri::command]
+pub fn get_rows(state: State<'_, AppState>, offset: u64, count: u64) -> RowWindowDto {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+
+    let count = count.min(MAX_WINDOW) as usize;
+    let rows = view::build_rows(&indices, &inner.view.hits, offset as usize, count)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    RowWindowDto {
+        generation: inner.view.generation,
+        total: inner.view.hits.len() as u64,
+        offset,
+        rows,
+    }
+}
+
+/// Selection totals for the status bar. `picks` are positions in the current
+/// view; `all` summarizes the whole result set (select-all without shipping
+/// millions of indexes across IPC).
+#[tauri::command]
+pub fn selection_summary(
+    state: State<'_, AppState>,
+    picks: Vec<u32>,
+    all: bool,
+) -> SelectionSummaryDto {
+    let inner = state.inner.lock().unwrap();
+    let indices: Vec<&emfit_core::model::index::Index> =
+        inner.volumes.iter().map(|v| v.index.as_ref()).collect();
+
+    let summary = if all {
+        view::summarize_all(&indices, &inner.view.hits)
+    } else {
+        view::summarize(&indices, &inner.view.hits, &picks)
+    };
+    summary.into()
+}
+
+/// The preset filters (`Filters.csv`): built-ins, or the user's own file
+/// beside the app config when present.
+#[tauri::command]
+pub fn list_presets() -> Vec<PresetDto> {
+    presets::load().into_iter().map(Into::into).collect()
+}
+
+// ---------------------------------------------------------------------------
+// the search worker
+// ---------------------------------------------------------------------------
+
+/// Re-run the view pipeline on a worker thread: parse → (search) → sort →
+/// install → `view:updated`.
 ///
-/// `level` is the JS console level (`error`/`warn`/`info`/`debug`/`trace`);
-/// anything else maps to `info`. The `frontend` target keeps these lines easy to
-/// grep and is filtered at `debug` by default (see `logging::DEFAULT_FILTER`).
+/// `sort_only` skips the filter pass and re-sorts the current hits. A worker
+/// only installs its result when the generation it started under is still
+/// current — that is what makes the query interruptible: the next keystroke
+/// bumps the generation and cancels the token, and the stale worker's work
+/// is discarded.
+fn requery(app: &AppHandle, sort_only: bool) {
+    let state = app.state::<AppState>();
+    let mut inner = state.inner.lock().unwrap();
+
+    inner.view.generation += 1;
+    let generation = inner.view.generation;
+    if let Some(cancel) = inner.view.search_cancel.take() {
+        cancel.cancel();
+    }
+    let cancel = CancellationToken::new();
+    inner.view.search_cancel = Some(cancel.clone());
+
+    let raw = inner.view.raw.clone();
+    let sort = inner.view.sort;
+    let volumes: Vec<(
+        Arc<emfit_core::model::index::Index>,
+        emfit_core::service::fold::CaseFold,
+    )> = inner
+        .volumes
+        .iter()
+        .map(|v| (v.index.clone(), v.fold.clone()))
+        .collect();
+    let previous_hits = sort_only.then(|| inner.view.hits.clone());
+    drop(inner);
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let started = Instant::now();
+        let query = Query::parse(&raw);
+        let warnings = query.warnings.clone();
+
+        let mut hits = match previous_hits {
+            Some(hits) => (*hits).clone(),
+            None => {
+                let refs: Vec<(&emfit_core::model::index::Index, _)> = volumes
+                    .iter()
+                    .map(|(index, fold)| (index.as_ref(), fold))
+                    .collect();
+                match search::search_all(&refs, &query, &cancel) {
+                    Some(hits) => hits,
+                    // Interrupted: a newer query owns the view now.
+                    None => return,
+                }
+            }
+        };
+
+        let indices: Vec<&emfit_core::model::index::Index> =
+            volumes.iter().map(|(index, _)| index.as_ref()).collect();
+        view::sort_hits(&indices, &mut hits, sort);
+
+        let volumes_total: u64 = indices
+            .iter()
+            .map(|index| index.node(index.root()).total_size())
+            .sum();
+
+        let update = ViewUpdatedDto {
+            generation,
+            total: hits.len() as u64,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            warnings,
+            volumes_total_bytes: volumes_total,
+            volumes_total_display: view::human_size(volumes_total),
+        };
+
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
+        if inner.view.generation != generation {
+            return; // superseded while we worked
+        }
+        inner.view.hits = Arc::new(hits);
+        drop(inner);
+
+        let _ = app.emit("view:updated", update);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// template plumbing (config, logging)
+// ---------------------------------------------------------------------------
+
+/// Emit a log line that originated in the webview into the Rust `tracing`
+/// pipeline, so frontend and backend logs share one file and one format.
 #[tauri::command]
 pub fn log_event(level: String, message: String) {
     match level.as_str() {
@@ -52,27 +383,17 @@ pub fn log_event(level: String, message: String) {
     }
 }
 
-/// Read the current application config. The shell holds the loaded `Config` in
-/// managed state (the Rust side owns truth, STANDARDS Â§3.3); this hands the
-/// webview a snapshot to project into the UI.
+/// Read the current application config.
 #[tauri::command]
 pub fn get_config(config: State<'_, Mutex<Config>>) -> Config {
-    let cfg = config.lock().unwrap().clone();
-    tracing::debug!(theme = ?cfg.theme, "config requested by webview");
-    cfg
+    config.lock().unwrap().clone()
 }
 
-/// Replace the application config and persist it to disk. The webview loads the
-/// config, mutates a setting, and sends the whole value back â€” so adding a new
-/// setting needs no new command, just a new field on `Config`. The full value
-/// round-trips (including `schema_version`) so the frontend never has to
-/// understand fields it doesn't use.
+/// Replace the application config and persist it to disk.
 #[tauri::command]
 pub fn set_config(new_config: Config, config: State<'_, Mutex<Config>>) -> CommandResult<()> {
     let mut guard = config.lock().unwrap();
-    tracing::info!(theme = ?new_config.theme, "updating application config");
     *guard = new_config;
     guard.save()?;
-    tracing::debug!("config persisted to disk");
     Ok(())
 }

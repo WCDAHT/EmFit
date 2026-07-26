@@ -9,6 +9,7 @@
 mod commands;
 mod dto;
 mod error;
+mod state;
 
 use std::sync::Mutex;
 
@@ -37,6 +38,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(config)
+        // Scanned indexes and the current search view (state::AppState). The
+        // Rust side owns truth; the webview projects it (STANDARDS §3.3).
+        .manage(state::AppState::new())
         // Plugins expose capability-gated APIs to the webview. `opener` opens
         // URLs/paths in the OS default handler; `dialog` is the native
         // open/save file picker (replaces a hand-rolled chooser). Grant their
@@ -47,10 +51,19 @@ pub fn run() {
         // plugin/core commands (gated by capabilities, Â§3.6), your own
         // commands need no permission entry â€” registering them is enough.
         .invoke_handler(tauri::generate_handler![
-            commands::greet,
             commands::log_event,
             commands::get_config,
-            commands::set_config
+            commands::set_config,
+            commands::list_volumes,
+            commands::elevation_status,
+            commands::relaunch_elevated,
+            commands::start_scan,
+            commands::cancel_scan,
+            commands::set_query,
+            commands::set_sort,
+            commands::get_rows,
+            commands::selection_summary,
+            commands::list_presets
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
