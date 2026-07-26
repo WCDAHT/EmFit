@@ -5,8 +5,22 @@
 //! per-record allocation, no copying a kilobyte out only to throw it away.
 //!
 //! Names are the exception, because they arrive as UTF-16 and the index wants
-//! UTF-8. They go into one arena per batch, reused across the whole scan, so
-//! the cost is a few hundred allocations rather than a few million.
+//! UTF-8. They go into one arena per parse batch, reused across the whole
+//! scan, so the cost is a few hundred allocations rather than a few million.
+//!
+//! # Overlapped, double-buffered I/O
+//!
+//! A dedicated reader thread issues the next read while the current chunk is
+//! being parsed, cycling two sector-aligned buffers through a pair of
+//! channels. v1 was a strictly serial read→parse→read loop with queue depth 1;
+//! the disk idled during every parse and the CPU idled during every read.
+//!
+//! # Parallel parse
+//!
+//! Each chunk is fanned out across rayon threads, every worker accumulating
+//! into its own scratch ([`WorkerOut`]) so the hot path takes no locks. The
+//! outputs are merged and flushed to the sink on the coordinating thread — the
+//! sink stays single-threaded and dumb, per `architecture.md` §8.
 //!
 //! # Extension records
 //!
@@ -39,12 +53,25 @@
 //! listed somewhere, `total_allocated` says how much disk it costs. Counting
 //! the bytes once per link would report a WinSxS-heavy volume as several times
 //! its real size.
+//!
+//! # Alternate data streams
+//!
+//! A named `$DATA` attribute is an ADS. Its **allocated** bytes are folded
+//! into the owning file's allocated size — they genuinely occupy disk, and
+//! WizTree accounts them the same way — while the logical size is *not* added
+//! to the file's, because streams like `$BadClus:$Bad` report a logical size
+//! equal to the whole volume while occupying nothing. Each stream is also
+//! recorded individually in [`SweepOutcome::ads`], keyed by the owning MFT
+//! record, so a detail pane can list them later.
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crate::error::Result;
+use rayon::prelude::*;
+
+use crate::error::{Error, Result};
 use crate::model::entry::{EntryFlags, RawEntry, Times};
 use crate::model::sink::{EntrySink, ScanWarning};
 use crate::parser::block::{AlignedBuf, BlockSource};
@@ -89,6 +116,31 @@ impl Default for ScanOptions {
     }
 }
 
+/// One alternate data stream found during the sweep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdsStream {
+    /// MFT record number of the owning file.
+    pub owner: u64,
+    /// The stream's name — the `secret` in `file.txt:secret`.
+    pub name: String,
+    /// Logical bytes. Can be enormous for sparse system streams
+    /// (`$BadClus:$Bad` spans the volume), which is why it is reported here
+    /// but never added to the owner's logical size.
+    pub size: u64,
+    /// Bytes actually occupied on disk. Folded into the owner's allocated
+    /// size during the sweep.
+    pub allocated: u64,
+}
+
+/// Everything one sweep produced besides what went into the sink.
+#[derive(Debug, Default)]
+pub struct SweepOutcome {
+    pub stats: ScanStats,
+    /// Every alternate data stream seen, keyed by owning record. A side table
+    /// per `architecture.md` §7 rule 2 — never widens `Node`.
+    pub ads: Vec<AdsStream>,
+}
+
 /// What one sweep did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScanStats {
@@ -129,6 +181,12 @@ pub struct ScanStats {
     /// them carries the file's bytes a second time.
     pub hard_link_aliases: u64,
 
+    /// Alternate data streams seen.
+    pub ads_streams: u64,
+    /// Disk bytes those streams occupy, already folded into their owners'
+    /// allocated sizes.
+    pub ads_bytes: u64,
+
     pub bytes_read: u64,
     /// Reads issued. Compare against `records_read` to see the batching work.
     pub reads: u64,
@@ -157,6 +215,35 @@ impl ScanStats {
         }
         self.bytes_read as f64 / secs / (1024.0 * 1024.0)
     }
+
+    /// Fold a parse worker's counters in. I/O-side fields (`reads`,
+    /// `bytes_read`, `records_read`, `elapsed`, `bitmap_in_use`, `cancelled`,
+    /// `entries_emitted`) belong to the coordinating thread and are not
+    /// merged.
+    fn absorb(&mut self, other: &ScanStats) {
+        self.records_in_use += other.records_in_use;
+        self.files += other.files;
+        self.directories += other.directories;
+        self.never_used_slots += other.never_used_slots;
+        self.bad_records += other.bad_records;
+        self.failed_fixup += other.failed_fixup;
+        self.unnamed_records += other.unnamed_records;
+        self.dos_only_records += other.dos_only_records;
+        self.extension_records += other.extension_records;
+        self.deferred_bases += other.deferred_bases;
+        self.multi_linked_records += other.multi_linked_records;
+        self.hard_link_aliases += other.hard_link_aliases;
+        self.ads_streams += other.ads_streams;
+        self.ads_bytes += other.ads_bytes;
+    }
+}
+
+/// One filled buffer on its way from the reader thread to the parser.
+struct Chunk {
+    buf: AlignedBuf,
+    first_record: u64,
+    records: u64,
+    span: usize,
 }
 
 /// Read the whole MFT into `sink`.
@@ -167,11 +254,13 @@ pub fn sweep(
     progress: &mut dyn FnMut(Progress),
     cancel: &CancellationToken,
     options: ScanOptions,
-) -> Result<ScanStats> {
+) -> Result<SweepOutcome> {
     let started = Instant::now();
     let mut stats = ScanStats::default();
+    let mut ads: Vec<AdsStream> = Vec::new();
 
     let record_size = u64::from(layout.boot.bytes_per_record);
+    let bytes_per_sector = layout.boot.bytes_per_sector;
     let total_records = layout.records_to_scan().min(layout.capacity_records());
 
     // The bitmap turns "slots ever written" into "files actually here", which
@@ -199,71 +288,141 @@ pub fn sweep(
     progress(Progress::started("Reading the MFT", Some(expected)));
 
     let records_per_chunk = (options.chunk_bytes as u64 / record_size).max(1);
-    let mut buf = AlignedBuf::for_source(source, (records_per_chunk * record_size) as usize);
-    let mut batch = Batch::with_capacity(records_per_chunk as usize);
-    let mut held = Held::default();
+    let chunk_bytes = (records_per_chunk * record_size) as usize;
 
-    let mut record = 0u64;
+    // Two buffers, two channels: the reader fills one while the parser drains
+    // the other. `sync_channel(2)` means a send can never block, so the reader
+    // only ever waits for a free buffer — dropping `free_tx` is what stops it.
+    let (full_tx, full_rx) = mpsc::sync_channel::<Result<Chunk>>(2);
+    let (free_tx, free_rx) = mpsc::channel::<AlignedBuf>();
+    for _ in 0..2 {
+        let _ = free_tx.send(AlignedBuf::for_source(source, chunk_bytes));
+    }
+
+    let mut held = Held::default();
+    let mut read_error: Option<Error> = None;
     let mut last_tick = Instant::now();
 
-    while record < total_records {
-        if cancel.is_cancelled() {
-            stats.cancelled = true;
-            break;
-        }
+    std::thread::scope(|s| {
+        let extents = &layout.extents;
+        s.spawn(move || {
+            let mut record = 0u64;
+            while record < total_records {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                let Some(location) = extents.locate(record) else {
+                    break; // past the mapped extents
+                };
 
-        let Some(location) = layout.extents.locate(record) else {
-            break; // past the mapped extents
-        };
+                // Never read past the end of the fragment this record sits in.
+                // Without this the tail of a chunk is whatever happens to lie
+                // next on disk.
+                let to_read = location
+                    .contiguous_records
+                    .min(records_per_chunk)
+                    .min(total_records - record);
+                if to_read == 0 {
+                    // The record straddles a fragment boundary — only possible
+                    // when records are larger than clusters. Skip rather than
+                    // stall.
+                    record += 1;
+                    continue;
+                }
 
-        // Never read past the end of the fragment this record sits in. Without
-        // this the tail of a chunk is whatever happens to lie next on disk.
-        let to_read = location
-            .contiguous_records
-            .min(records_per_chunk)
-            .min(total_records - record);
-        if to_read == 0 {
-            // The record straddles a fragment boundary — only possible when
-            // records are larger than clusters. Skip rather than stall.
-            record += 1;
-            continue;
-        }
+                // Blocks until the parser hands a buffer back; ends when the
+                // parser is done with us and drops its end.
+                let Ok(mut buf) = free_rx.recv() else {
+                    break;
+                };
 
-        let span = (to_read * record_size) as usize;
-        source.read_exact_at(location.byte_offset, &mut buf.as_mut_slice()[..span])?;
-        stats.reads += 1;
-        stats.bytes_read += span as u64;
+                let span = (to_read * record_size) as usize;
+                match source.read_exact_at(location.byte_offset, &mut buf.as_mut_slice()[..span]) {
+                    Ok(()) => {
+                        let chunk = Chunk {
+                            buf,
+                            first_record: record,
+                            records: to_read,
+                            span,
+                        };
+                        if full_tx.send(Ok(chunk)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = full_tx.send(Err(e));
+                        break;
+                    }
+                }
+                record += to_read;
+            }
+        });
 
-        batch.clear();
+        while let Ok(message) = full_rx.recv() {
+            let mut chunk = match message {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    read_error = Some(e);
+                    break;
+                }
+            };
 
-        let chunk = &mut buf.as_mut_slice()[..span];
-        for (index, record_bytes) in chunk.chunks_exact_mut(record_size as usize).enumerate() {
-            let number = record + index as u64;
-            stats.records_read += 1;
-            parse_one(
-                number,
-                record_bytes,
-                layout.boot.bytes_per_sector,
-                &mut batch,
-                &mut held,
-                &mut stats,
-                sink,
+            stats.reads += 1;
+            stats.bytes_read += chunk.span as u64;
+            stats.records_read += chunk.records;
+
+            let outputs = parse_chunk(
+                &mut chunk.buf.as_mut_slice()[..chunk.span],
+                chunk.first_record,
+                record_size as usize,
+                bytes_per_sector,
             );
+
+            let mut broke = false;
+            for mut out in outputs {
+                stats.absorb(&out.stats);
+                for warning in out.warnings.drain(..) {
+                    sink.warn(warning);
+                }
+                for (id, base) in out.bases.drain(..) {
+                    held.bases.insert(id, base);
+                }
+                for (id, extension) in out.extensions.drain(..) {
+                    held.extensions.entry(id).or_default().push(extension);
+                }
+                ads.append(&mut out.ads);
+                if flush(&mut out.batch, &mut stats, sink) == ControlFlow::Break(()) {
+                    broke = true;
+                    break;
+                }
+            }
+            if broke {
+                stats.cancelled = true;
+                break;
+            }
+
+            // Hand the buffer back for the next read.
+            let _ = free_tx.send(chunk.buf);
+
+            if last_tick.elapsed() >= options.progress_interval {
+                progress(Progress::Tick {
+                    done: stats.entries_emitted,
+                });
+                last_tick = Instant::now();
+            }
         }
 
-        if flush(&mut batch, &mut stats, sink) == ControlFlow::Break(()) {
-            stats.cancelled = true;
-            break;
-        }
+        // Unblock the reader (it may be waiting on a free buffer) and let the
+        // scope join it.
+        drop(free_tx);
+        drop(full_rx);
+    });
 
-        record += to_read;
-
-        if last_tick.elapsed() >= options.progress_interval {
-            progress(Progress::Tick {
-                done: stats.entries_emitted,
-            });
-            last_tick = Instant::now();
-        }
+    if let Some(e) = read_error {
+        return Err(e);
+    }
+    if cancel.is_cancelled() {
+        stats.cancelled = true;
     }
 
     // Everything the sweep held back, now that both halves are in hand.
@@ -272,6 +431,7 @@ pub fn sweep(
             "Resolving extension records",
             Some(held.bases.len() as u64),
         ));
+        let mut batch = Batch::default();
         resolve_held(&mut held, &mut batch, &mut stats, sink);
     }
 
@@ -284,12 +444,39 @@ pub fn sweep(
         emitted = stats.entries_emitted,
         extensions = stats.extension_records,
         resolved = stats.resolved_from_extensions,
+        ads = stats.ads_streams,
         reads = stats.reads,
         elapsed_ms = stats.elapsed.as_millis(),
         "MFT sweep complete"
     );
 
-    Ok(stats)
+    Ok(SweepOutcome { stats, ads })
+}
+
+/// Fan one chunk's records out across rayon workers.
+///
+/// Every worker folds into its own [`WorkerOut`], so the parse takes no locks;
+/// `collect` preserves split order, which keeps the emission order — and
+/// therefore the whole scan — deterministic.
+fn parse_chunk(
+    chunk: &mut [u8],
+    first_record: u64,
+    record_size: usize,
+    bytes_per_sector: u32,
+) -> Vec<WorkerOut> {
+    chunk
+        .par_chunks_exact_mut(record_size)
+        .enumerate()
+        .fold(WorkerOut::default, |mut out, (index, record_bytes)| {
+            parse_one(
+                first_record + index as u64,
+                record_bytes,
+                bytes_per_sector,
+                &mut out,
+            );
+            out
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -319,8 +506,8 @@ struct NameSlot {
     parent: u64,
 }
 
-/// Scratch space reused across every batch, so a scan of a million records
-/// makes a handful of allocations rather than a million.
+/// Scratch space reused across every record a worker parses, so a scan of a
+/// million records makes a handful of allocations rather than a million.
 struct Batch {
     /// Every name in this batch, concatenated.
     names: String,
@@ -333,16 +520,18 @@ struct Batch {
     slots: Vec<NameSlot>,
 }
 
-impl Batch {
-    fn with_capacity(records: usize) -> Self {
+impl Default for Batch {
+    fn default() -> Self {
         Self {
-            names: String::with_capacity(64 * 1024),
-            pending: Vec::with_capacity(records),
+            names: String::with_capacity(16 * 1024),
+            pending: Vec::with_capacity(1024),
             scratch: String::with_capacity(256),
             slots: Vec::with_capacity(8),
         }
     }
+}
 
+impl Batch {
     fn clear(&mut self) {
         self.names.clear();
         self.pending.clear();
@@ -368,6 +557,18 @@ impl Batch {
             flags,
         });
     }
+}
+
+/// Everything one parse worker accumulates. Merged on the coordinating thread
+/// after the chunk is done, so workers share nothing.
+#[derive(Default)]
+struct WorkerOut {
+    batch: Batch,
+    bases: Vec<(u64, HeldBase)>,
+    extensions: Vec<(u64, HeldExtension)>,
+    ads: Vec<AdsStream>,
+    stats: ScanStats,
+    warnings: Vec<ScanWarning>,
 }
 
 /// The id an extra hard-link name is emitted under.
@@ -442,6 +643,9 @@ struct HeldExtension {
     names: Vec<NameCandidate>,
     /// `(data_size, physical_size)` from an unnamed `$DATA` at VCN 0.
     size: Option<(u64, u64)>,
+    /// Disk bytes of alternate data streams held in this extension record,
+    /// owed to the base record's allocated size.
+    ads_allocated: u64,
 }
 
 /// Both halves of every split file, collected as the sweep passes them.
@@ -487,6 +691,9 @@ fn resolve_held(
                     base.fields.has_data = true;
                     gained = true;
                 }
+                // ADS bytes are real disk cost wherever the stream's attribute
+                // happened to land.
+                base.fields.allocated += extension.ads_allocated;
             }
         }
 
@@ -546,16 +753,11 @@ fn resolve_held(
 // per-record parsing
 // ---------------------------------------------------------------------------
 
-/// Parse one record: emit it, or hold it back for [`resolve_held`].
-fn parse_one(
-    number: u64,
-    record_bytes: &mut [u8],
-    bytes_per_sector: u32,
-    batch: &mut Batch,
-    held: &mut Held,
-    stats: &mut ScanStats,
-    sink: &mut dyn EntrySink,
-) {
+/// Parse one record into a worker's scratch: emit it, or hold it back for
+/// [`resolve_held`].
+fn parse_one(number: u64, record_bytes: &mut [u8], bytes_per_sector: u32, out: &mut WorkerOut) {
+    let stats = &mut out.stats;
+
     // Cheapest check first: a free record needs no repair and no walking, and a
     // large share of any used volume's table is free.
     let Ok(header) = RecordHeader::parse(record_bytes) else {
@@ -577,7 +779,7 @@ fn parse_one(
         Ok(record) => record,
         Err(e) => {
             stats.failed_fixup += 1;
-            sink.warn(ScanWarning::BadRecord {
+            out.warnings.push(ScanWarning::BadRecord {
                 fs_id: number,
                 reason: e.to_string(),
             });
@@ -597,6 +799,10 @@ fn parse_one(
     let mut saw_dos_name = false;
     // True when an $ATTRIBUTE_LIST sends a name or the data elsewhere.
     let mut split = false;
+    // Disk bytes of this record's alternate data streams.
+    let mut ads_allocated = 0u64;
+
+    let batch = &mut out.batch;
 
     // Names go straight into the arena as they are found. If the record turns
     // out to need holding back, the arena is rewound to here and the names are
@@ -633,7 +839,13 @@ fn parse_one(
                 }
 
                 fname.decode_name_into(&mut batch.scratch);
-                if batch.scratch.is_empty() {
+                // The root names itself "." — NTFS-internal spelling, not a
+                // display name. It becomes the empty name the sink contract
+                // reserves for the root.
+                let is_root_self_name = fname.parent_record() == number && batch.scratch == ".";
+                if is_root_self_name {
+                    batch.scratch.clear();
+                } else if batch.scratch.is_empty() {
                     continue;
                 }
                 // Every real name is somewhere the file genuinely appears, so
@@ -649,24 +861,47 @@ fn parse_one(
                 });
             }
             // The unnamed $DATA is the file's contents; a named one is an
-            // alternate stream, whose bytes are not the file's size.
-            AttributeType::Data if attribute.is_unnamed() => {
-                if let Some(nr) = attribute.non_resident() {
-                    // Only the fragment at VCN 0 carries the real sizes; later
-                    // fragments repeat stale values.
-                    if nr.starting_vcn() == 0 {
-                        fields.size = nr.data_size();
-                        // What it costs, not the virtual range it spans — those
-                        // differ for every compressed and sparse file.
-                        fields.allocated = nr.physical_size();
+            // alternate stream, whose bytes occupy disk but are not the file's
+            // logical size.
+            AttributeType::Data => {
+                if attribute.is_unnamed() {
+                    if let Some(nr) = attribute.non_resident() {
+                        // Only the fragment at VCN 0 carries the real sizes;
+                        // later fragments repeat stale values.
+                        if nr.starting_vcn() == 0 {
+                            fields.size = nr.data_size();
+                            // What it costs, not the virtual range it spans —
+                            // those differ for every compressed and sparse
+                            // file.
+                            fields.allocated = nr.physical_size();
+                            fields.has_data = true;
+                        }
+                    } else if let Some(value) = attribute.resident_value() {
+                        // Resident: the contents live in the record, so the
+                        // file occupies no clusters at all.
+                        fields.size = value.len() as u64;
+                        fields.allocated = 0;
                         fields.has_data = true;
                     }
-                } else if let Some(value) = attribute.resident_value() {
-                    // Resident: the contents live in the record, so the file
-                    // occupies no clusters at all.
-                    fields.size = value.len() as u64;
-                    fields.allocated = 0;
-                    fields.has_data = true;
+                } else {
+                    // An alternate data stream.
+                    let (size, allocated) = match attribute.non_resident() {
+                        Some(nr) if nr.starting_vcn() == 0 => (nr.data_size(), nr.physical_size()),
+                        Some(_) => continue, // later fragment of a stream already seen
+                        None => match attribute.resident_value() {
+                            Some(value) => (value.len() as u64, 0),
+                            None => continue,
+                        },
+                    };
+                    ads_allocated += allocated;
+                    stats.ads_streams += 1;
+                    stats.ads_bytes += allocated;
+                    out.ads.push(AdsStream {
+                        owner: base.unwrap_or(number),
+                        name: decode_utf16(attribute.name_bytes()),
+                        size,
+                        allocated,
+                    });
                 }
             }
             AttributeType::AttributeList => {
@@ -706,18 +941,25 @@ fn parse_one(
         if let Some(base_number) = base {
             stats.extension_records += 1;
             let size = fields.has_data.then_some((fields.size, fields.allocated));
-            if !names.is_empty() || size.is_some() {
-                held.extensions
-                    .entry(base_number)
-                    .or_default()
-                    .push(HeldExtension { names, size });
+            if !names.is_empty() || size.is_some() || ads_allocated > 0 {
+                out.extensions.push((
+                    base_number,
+                    HeldExtension {
+                        names,
+                        size,
+                        ads_allocated,
+                    },
+                ));
             }
         } else {
             stats.deferred_bases += 1;
-            held.bases.insert(number, HeldBase { fields, names });
+            fields.allocated += ads_allocated;
+            out.bases.push((number, HeldBase { fields, names }));
         }
         return;
     }
+
+    fields.allocated += ads_allocated;
 
     if batch.slots.is_empty() {
         // In use, complete, and yet nothing usable to call it.
@@ -815,6 +1057,18 @@ fn is_better(candidate: Namespace, current: Option<Namespace>) -> bool {
         None => true,
         Some(current) => rank(candidate) > rank(current),
     }
+}
+
+/// Decode UTF-16LE bytes, replacing lone surrogates. Used for the rare named
+/// stream; file names go through the allocation-free
+/// [`FileName::decode_name_into`].
+fn decode_utf16(bytes: &[u8]) -> String {
+    let units = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]));
+    char::decode_utf16(units)
+        .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect()
 }
 
 /// Map the DOS attribute bits onto the index's flags.
@@ -976,6 +1230,14 @@ mod tests {
     }
 
     #[test]
+    fn utf16_decoding_survives_lone_surrogates() {
+        // "A" then an unpaired high surrogate.
+        let bytes = [0x41, 0x00, 0x00, 0xD8];
+        assert_eq!(decode_utf16(&bytes), "A\u{FFFD}");
+        assert_eq!(decode_utf16(&[]), "");
+    }
+
+    #[test]
     fn rates_are_zero_rather_than_infinite_for_an_instant_scan() {
         let stats = ScanStats::default();
         assert_eq!(stats.records_per_second(), 0.0);
@@ -992,5 +1254,32 @@ mod tests {
         };
         assert_eq!(stats.records_per_second(), 500_000.0);
         assert_eq!(stats.mib_per_second(), 256.0);
+    }
+
+    #[test]
+    fn worker_stats_fold_into_the_totals() {
+        let mut main = ScanStats {
+            records_read: 100, // I/O-side: must survive the merge untouched
+            reads: 2,
+            ..Default::default()
+        };
+        let worker = ScanStats {
+            records_in_use: 10,
+            files: 7,
+            directories: 3,
+            ads_streams: 1,
+            ads_bytes: 4096,
+            records_read: 999, // parse workers do not own this counter
+            ..Default::default()
+        };
+        main.absorb(&worker);
+
+        assert_eq!(main.records_in_use, 10);
+        assert_eq!(main.files, 7);
+        assert_eq!(main.directories, 3);
+        assert_eq!(main.ads_streams, 1);
+        assert_eq!(main.ads_bytes, 4096);
+        assert_eq!(main.records_read, 100, "I/O counters are not merged");
+        assert_eq!(main.reads, 2);
     }
 }

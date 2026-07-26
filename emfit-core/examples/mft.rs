@@ -224,7 +224,7 @@ fn sweep_and_build(
     writeln!(out, "\n{}", "=".repeat(60))?;
     writeln!(out, "SWEEP")?;
 
-    let stats = ntfs::sweep(
+    let outcome = ntfs::sweep(
         src,
         layout,
         &mut builder,
@@ -232,6 +232,7 @@ fn sweep_and_build(
         &cancel,
         ntfs::ScanOptions::default(),
     )?;
+    let stats = outcome.stats;
 
     writeln!(out, "\nread:")?;
     writeln!(out, "  records read      {}", stats.records_read)?;
@@ -255,6 +256,17 @@ fn sweep_and_build(
     writeln!(out, "  entries           {}", stats.entries_emitted)?;
     writeln!(out, "  files             {}", stats.files)?;
     writeln!(out, "  directories       {}", stats.directories)?;
+    writeln!(
+        out,
+        "  hard link names   {}  (from {} multi-linked records)",
+        stats.hard_link_aliases, stats.multi_linked_records
+    )?;
+    writeln!(
+        out,
+        "  ads streams       {}  occupying {}",
+        stats.ads_streams,
+        format_bytes(stats.ads_bytes)
+    )?;
 
     writeln!(out, "\nsplit files (attributes in extension records):")?;
     writeln!(out, "  extension records {}", stats.extension_records)?;
@@ -271,11 +283,6 @@ fn sweep_and_build(
     )?;
 
     writeln!(out, "\nstill dropped:")?;
-    writeln!(
-        out,
-        "  multi-linked      {}  (extra hard links not emitted)",
-        stats.multi_linked_records
-    )?;
     writeln!(out, "  unnamed           {}", stats.unnamed_records)?;
     writeln!(out, "  8.3-only          {}", stats.dos_only_records)?;
     writeln!(out, "  bad signature     {}", stats.bad_records)?;

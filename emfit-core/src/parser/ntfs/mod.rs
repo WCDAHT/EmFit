@@ -48,4 +48,4 @@ pub use bootstrap::{MftLayout, probe, read_boot_sector};
 pub use extents::{Extent, MftExtents, RecordLocation};
 pub use record::{Record, RecordHeader};
 pub use runs::DataRun;
-pub use scanner::{ScanOptions, ScanStats, sweep};
+pub use scanner::{AdsStream, ScanOptions, ScanStats, SweepOutcome, sweep};

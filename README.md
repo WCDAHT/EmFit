@@ -52,7 +52,8 @@ EmFit/
 ├── package.json          # frontend deps + scripts (dev → vite frontend)
 ├── emfit-core/           # logic; testable headless
 │   ├── src/{model,parser,service,error.rs,lib.rs}
-│   └── tests/fixtures/   # real input samples for parser tests
+│   ├── src/bin/emfit-cli.rs  # verification CLI: volumes, scan, stats, read-mft, tree-size
+│   └── tests/fixtures/   # fixture MFT records for parser tests
 ├── src-tauri/            # Tauri shell (Rust)
 │   ├── src/{main.rs,lib.rs,commands.rs,error.rs}
 │   ├── capabilities/     # least-privilege permission grants

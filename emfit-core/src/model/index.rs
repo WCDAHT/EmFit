@@ -364,3 +364,16 @@ impl Index {
         out
     }
 }
+
+impl std::fmt::Debug for Index {
+    /// Shape only — an index holds millions of nodes and a multi-megabyte
+    /// arena, and no debug dump should ever try to print them.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Index")
+            .field("nodes", &self.nodes.len())
+            .field("arena_bytes", &self.arena.len())
+            .field("root", &self.root)
+            .field("caps", &self.caps)
+            .finish_non_exhaustive()
+    }
+}
