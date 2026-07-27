@@ -206,6 +206,22 @@ pub fn encode_runs(runs: &[(u64, u64)]) -> Vec<u8> {
     out
 }
 
+/// One sparse run (a hole): length only, zero offset bytes — how
+/// `$BadClus:$Bad` "spans" the volume while owning no clusters.
+pub fn encode_sparse_run(clusters: u64) -> Vec<u8> {
+    let len_len = ((64 - clusters.leading_zeros() as usize).div_ceil(8)).max(1);
+    let mut out = vec![len_len as u8];
+    out.extend_from_slice(&clusters.to_le_bytes()[..len_len]);
+    out.push(0); // terminator
+    out
+}
+
+/// Set an attribute's stream flags (offset 0x0C): `0x8000` sparse,
+/// `0x0001` compressed.
+pub fn set_attr_flags(attribute: &mut [u8], flags: u16) {
+    attribute[0x0C..0x0E].copy_from_slice(&flags.to_le_bytes());
+}
+
 // ---------------------------------------------------------------------------
 // records
 // ---------------------------------------------------------------------------

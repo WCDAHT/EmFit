@@ -25,6 +25,15 @@
 
 use crate::model::index::{Index, NodeId};
 use crate::service::filetype::FileKind;
+use crate::service::view::human_size;
+
+/// The `id` carried by an aggregate ("N smaller items") rectangle — not a
+/// real node; actions must ignore it.
+pub const AGGREGATE_ID: u32 = u32::MAX;
+
+/// Directories whose inner area is below this many px² are not subdivided;
+/// they paint as solid blocks instead (children would be sub-pixel).
+const RECURSE_MIN_AREA: f64 = 32.0;
 
 /// One rectangle to paint. Coordinates are canvas pixels, origin top-left.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +54,16 @@ pub struct TreemapRect {
     /// Which depth-1 subtree of the drill root this rectangle falls under —
     /// the key for color-by-folder. Depth-0 rects use their own ordinal.
     pub branch: u16,
+    /// This directory rect reserved [`TreemapOptions::dir_header_px`] at its
+    /// top for the name strip; its children are laid out below it.
+    pub headed: bool,
+    /// This directory's children were laid out inside it. False for a
+    /// directory too small (or too deep) to subdivide — paint those as solid
+    /// blocks, since nothing tiles them.
+    pub expanded: bool,
+    /// A tail of items too small to place individually, folded into one
+    /// rectangle so the parent tiles completely. `id` is [`AGGREGATE_ID`].
+    pub aggregate: bool,
     pub name: String,
     /// Logical bytes (label), and the allocated bytes the geometry used.
     pub size: u64,
@@ -57,9 +76,21 @@ pub struct TreemapOptions {
     pub height: f32,
     /// How deep to nest below the drill root.
     pub max_depth: u8,
-    /// Rectangles smaller than this many px² are dropped; directories this
-    /// small are drawn but not descended into.
+    /// The smallest rectangle a child is placed at individually, in px².
+    /// Children below it are **not dropped** — they fold into one aggregate
+    /// rectangle per directory, so the space is always painted.
     pub min_area: f32,
+    /// At most this many individually-placed children per directory; the
+    /// rest aggregate. Bounds the IPC payload on pathological flat folders.
+    pub max_children: usize,
+    /// Height reserved at the top of a directory rect for its name strip
+    /// (`name\ (999 GB)`), when the rect is tall enough to afford it —
+    /// children tile the space **below** the strip, WizTree-style.
+    pub dir_header_px: f32,
+    /// Padding between a directory's border and its children, on every
+    /// side. This is the only spacing in the map: files tile edge to edge,
+    /// so the padding is what keeps each folder's border readable.
+    pub dir_padding_px: f32,
 }
 
 impl Default for TreemapOptions {
@@ -68,7 +99,10 @@ impl Default for TreemapOptions {
             width: 1024.0,
             height: 640.0,
             max_depth: 6,
-            min_area: 24.0,
+            min_area: 2.0,
+            max_children: 2000,
+            dir_header_px: 14.0,
+            dir_padding_px: 2.0,
         }
     }
 }
@@ -128,20 +162,18 @@ pub fn layout(
             let Some(index) = indices.get(vol as usize) else {
                 return out;
             };
-            let node = index.node(NodeId::new(id));
-            emit(&mut out, vol, index, NodeId::new(id), canvas, 0, 0);
-            if node.is_directory() {
-                descend(
-                    index,
-                    vol,
-                    NodeId::new(id),
-                    canvas.inset(1.0),
-                    1,
-                    None,
-                    options,
-                    &mut out,
-                );
-            }
+            let at = emit(&mut out, vol, index, NodeId::new(id), canvas, 0, 0);
+            maybe_descend(
+                index,
+                vol,
+                NodeId::new(id),
+                at,
+                canvas,
+                1,
+                None,
+                options,
+                &mut out,
+            );
         }
         None => {
             // Every volume in one map, weighted by what it holds.
@@ -158,12 +190,13 @@ pub fn layout(
             squarify(&items, canvas, |&(slot, _), rect| {
                 let index = indices[slot];
                 let vol = slot as u16;
-                emit(&mut out, vol, index, index.root(), rect, 0, slot as u16);
-                descend(
+                let at = emit(&mut out, vol, index, index.root(), rect, 0, slot as u16);
+                maybe_descend(
                     index,
                     vol,
                     index.root(),
-                    rect.inset(1.0),
+                    at,
+                    rect,
                     1,
                     Some(slot as u16),
                     options,
@@ -175,7 +208,71 @@ pub fn layout(
     out
 }
 
-/// Recursively lay out `dir`'s children into `rect`.
+/// Subdivide an emitted directory rect when depth and size allow, marking
+/// `expanded`/`headed` on it accordingly. A directory left unexpanded paints
+/// as a solid block, so no space is ever blank.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "internal recursion; bundling these into a context struct would only rename the arguments"
+)]
+fn maybe_descend(
+    index: &Index,
+    vol: u16,
+    id: NodeId,
+    at: usize,
+    rect: Rect,
+    child_depth: u8,
+    branch: Option<u16>,
+    options: &TreemapOptions,
+    out: &mut Vec<TreemapRect>,
+) {
+    if !index.node(id).is_directory() {
+        return;
+    }
+    let (inner, headed) = child_area(rect, options);
+    if child_depth > options.max_depth || inner.area() < RECURSE_MIN_AREA {
+        return; // stays unexpanded: painted solid by the frontend
+    }
+    out[at].headed = headed;
+    out[at].expanded = true;
+    descend(index, vol, id, inner, child_depth, branch, options, out);
+}
+
+/// Where a directory's children go: inside the folder padding, below the
+/// name strip when the rect can afford one.
+fn child_area(rect: Rect, options: &TreemapOptions) -> (Rect, bool) {
+    let inner = rect.inset(f64::from(options.dir_padding_px).max(1.0));
+    let header = f64::from(options.dir_header_px);
+    if header > 0.0 && inner.h >= header + 10.0 && inner.w >= 32.0 {
+        (
+            Rect {
+                x: inner.x,
+                y: inner.y + header,
+                w: inner.w,
+                h: inner.h - header,
+            },
+            true,
+        )
+    } else {
+        (inner, false)
+    }
+}
+
+/// What one tile of a directory is: a real child, or the folded-up tail of
+/// children too small (or too many) to place individually.
+enum Tile {
+    Node(NodeId),
+    Rest {
+        count: u64,
+        size: u64,
+        allocated: u64,
+    },
+}
+
+/// Lay out `dir`'s children into `rect`, tiling it **completely**: children
+/// below [`TreemapOptions::min_area`] (or past
+/// [`TreemapOptions::max_children`]) fold into one aggregate rectangle
+/// instead of being dropped, so a WizTree-style map never shows blank space.
 #[allow(
     clippy::too_many_arguments,
     reason = "internal recursion; bundling these into a context struct would only rename the arguments"
@@ -190,10 +287,6 @@ fn descend(
     options: &TreemapOptions,
     out: &mut Vec<TreemapRect>,
 ) {
-    if depth > options.max_depth || rect.area() < f64::from(options.min_area) {
-        return;
-    }
-
     // Children with real footprint, largest first — squarify requires
     // descending weights. Hard-link aliases (allocated 0) drop out here,
     // which is exactly the one-owner accounting the geometry needs.
@@ -216,31 +309,94 @@ fn descend(
     }
     children.sort_by(|a, b| b.1.total_cmp(&a.1));
 
+    // Split into individually-placed children and the aggregated tail.
+    let total: f64 = children.iter().map(|(_, w)| w).sum();
+    let scale = rect.area() / total;
     let min_area = f64::from(options.min_area);
-    squarify(&children, rect, |&(child, _), child_rect| {
-        if child_rect.area() < min_area {
-            return; // too small to see; its bytes still shaped the siblings
+
+    let mut tiles: Vec<(Tile, f64)> = Vec::new();
+    let mut rest_weight = 0.0f64;
+    let mut rest = (0u64, 0u64, 0u64); // count, size, allocated
+    for (i, &(child, weight)) in children.iter().enumerate() {
+        if i < options.max_children && weight * scale >= min_area {
+            tiles.push((Tile::Node(child), weight));
+        } else {
+            let node = index.node(child);
+            rest_weight += weight;
+            rest.0 += 1;
+            rest.1 += if node.is_directory() {
+                node.total_size()
+            } else {
+                node.size()
+            };
+            rest.2 += if node.is_directory() {
+                node.total_allocated()
+            } else {
+                node.allocated()
+            };
         }
+    }
+    if rest_weight > 0.0 {
+        tiles.push((
+            Tile::Rest {
+                count: rest.0,
+                size: rest.1,
+                allocated: rest.2,
+            },
+            rest_weight,
+        ));
+        // The tail's sum can outweigh individual children; keep the list in
+        // the descending order squarify expects.
+        tiles.sort_by(|a, b| b.1.total_cmp(&a.1));
+    }
+
+    squarify(&tiles, rect, |(tile, _), child_rect| {
         // Depth-1 children of the drill root define the folder-color groups;
         // everything deeper inherits.
         let branch = inherited_branch.unwrap_or(out.len() as u16);
-        emit(out, vol, index, child, child_rect, depth, branch);
-
-        if index.node(child).is_directory() {
-            descend(
-                index,
+        match tile {
+            Tile::Node(child) => {
+                let at = emit(out, vol, index, *child, child_rect, depth, branch);
+                maybe_descend(
+                    index,
+                    vol,
+                    *child,
+                    at,
+                    child_rect,
+                    depth + 1,
+                    Some(branch),
+                    options,
+                    out,
+                );
+            }
+            Tile::Rest {
+                count,
+                size,
+                allocated,
+            } => out.push(TreemapRect {
                 vol,
-                child,
-                child_rect.inset(1.0),
-                depth + 1,
-                Some(branch),
-                options,
-                out,
-            );
+                id: AGGREGATE_ID,
+                x: child_rect.x as f32,
+                y: child_rect.y as f32,
+                w: child_rect.w as f32,
+                h: child_rect.h as f32,
+                depth,
+                is_dir: false,
+                synthetic: false,
+                category: 0,
+                branch,
+                headed: false,
+                expanded: false,
+                aggregate: true,
+                name: format!("{count} smaller items ({})", human_size(*allocated)),
+                size: *size,
+                allocated: *allocated,
+            }),
         }
     });
 }
 
+/// Push one rectangle; returns its position so the caller can mark `headed`.
 fn emit(
     out: &mut Vec<TreemapRect>,
     vol: u16,
@@ -249,7 +405,7 @@ fn emit(
     rect: Rect,
     depth: u8,
     branch: u16,
-) {
+) -> usize {
     let node = index.node(id);
     let name = if id == index.root() {
         index.caps().root_label.clone()
@@ -269,6 +425,9 @@ fn emit(
         synthetic: node.is_synthetic(),
         category: kind.category_slot(),
         branch,
+        headed: false,
+        expanded: false,
+        aggregate: false,
         size: if node.is_directory() {
             node.total_size()
         } else {
@@ -281,6 +440,7 @@ fn emit(
         },
         name,
     });
+    out.len() - 1
 }
 
 /// The squarified treemap algorithm (Bruls, Huizing, van Wijk).
@@ -427,6 +587,7 @@ mod tests {
             height: 500.0,
             max_depth: 6,
             min_area: 1.0,
+            ..TreemapOptions::default()
         }
     }
 
@@ -438,17 +599,18 @@ mod tests {
         let big = rects.iter().find(|r| r.name == "big.iso").unwrap();
         let docs = rects.iter().find(|r| r.name == "docs").unwrap();
 
-        // big.iso is 1200 of 2000 total → 60% of the canvas.
+        // big.iso is 1200 of 2000 total → 60% of the canvas (children tile
+        // the root's inner area, which loses the 1px padding and the 14px
+        // name strip — a few percent on a 500px canvas).
         let canvas_area = 1000.0 * 500.0;
         let big_share = (big.w * big.h) / canvas_area;
         assert!(
-            (big_share - 0.6).abs() < 0.02,
+            (big_share - 0.6).abs() < 0.04,
             "big.iso covers {big_share:.3} of the canvas, wanted ~0.60"
         );
-        // docs (800) is 40%, minus the 1px insets.
         let docs_share = (docs.w * docs.h) / canvas_area;
         assert!(
-            (docs_share - 0.4).abs() < 0.02,
+            (docs_share - 0.4).abs() < 0.04,
             "docs covers {docs_share:.3}"
         );
     }
@@ -540,9 +702,10 @@ mod tests {
         let rects = layout(&[&index], None, &options());
         let free_rect = rects.iter().find(|r| r.name == "Free space").unwrap();
         assert!(free_rect.synthetic);
-        // 3000 of 4000 bytes → 75% of the canvas.
+        // 3000 of 4000 bytes → 75% of the canvas (less the root's padding
+        // and name strip).
         let share = (free_rect.w * free_rect.h) / (1000.0 * 500.0);
-        assert!((share - 0.75).abs() < 0.02, "free space covers {share:.3}");
+        assert!((share - 0.75).abs() < 0.04, "free space covers {share:.3}");
     }
 
     #[test]
@@ -590,9 +753,132 @@ mod tests {
                 height: 6.0,
                 max_depth: 6,
                 min_area: 24.0,
+                ..TreemapOptions::default()
             },
         );
         assert!(tiny.len() <= 3, "tiny canvas yields {} rects", tiny.len());
+    }
+
+    #[test]
+    fn directories_reserve_a_name_strip_when_tall_enough() {
+        let index = index();
+        let rects = layout(&[&index], None, &options());
+
+        let docs = rects.iter().find(|r| r.name == "docs").unwrap();
+        assert!(docs.headed, "a large directory gets its name strip");
+        // Children start below the strip: 1px padding + 14px header.
+        let a = rects.iter().find(|r| r.name == "a.pdf").unwrap();
+        assert!(
+            a.y >= docs.y + 14.0,
+            "a.pdf starts at {} inside docs at {} — below the header",
+            a.y,
+            docs.y
+        );
+        assert!(!a.headed, "files never reserve a strip");
+
+        // With headers disabled, children tile right at the padding.
+        let no_header = layout(
+            &[&index],
+            None,
+            &TreemapOptions {
+                dir_header_px: 0.0,
+                ..options()
+            },
+        );
+        let docs = no_header.iter().find(|r| r.name == "docs").unwrap();
+        let a = no_header.iter().find(|r| r.name == "a.pdf").unwrap();
+        assert!(!docs.headed);
+        assert!(a.y <= docs.y + 2.5, "just the folder padding, no strip");
+    }
+
+    #[test]
+    fn small_children_aggregate_instead_of_leaving_blank_space() {
+        // One big file and 200 tiny ones: the tiny tail folds into a single
+        // aggregate rect, and together the children tile the whole inner
+        // area — the WizTree no-blank-space property.
+        let caps = crate::service::scan::ntfs_caps("C:".to_string());
+        let mut b = IndexBuilder::new(caps, CancellationToken::new());
+        let _ = b.push_batch(&[dir(5, 5, ""), file(10, 5, "big.bin", 1_000_000)]);
+        let names: Vec<String> = (0..200).map(|i| format!("tiny-{i}.txt")).collect();
+        let tiny: Vec<RawEntry<'_>> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| file(100 + i as u64, 5, name, 1))
+            .collect();
+        let _ = b.push_batch(&tiny);
+        let index = b.finish().0;
+
+        let rects = layout(&[&index], None, &options());
+
+        let aggregate = rects.iter().find(|r| r.aggregate).expect("tail folded");
+        assert_eq!(aggregate.id, AGGREGATE_ID);
+        assert_eq!(aggregate.allocated, 200);
+        assert!(aggregate.name.contains("200 smaller items"));
+
+        // Full coverage: the root's children (big + aggregate) fill its
+        // inner area exactly (inner = canvas minus the 2px folder padding
+        // and the 14px header strip).
+        let root = rects.iter().find(|r| r.depth == 0).unwrap();
+        assert!(root.expanded && root.headed);
+        let inner_area = f64::from(root.w - 4.0) * f64::from(root.h - 4.0 - 14.0);
+        let child_area: f64 = rects
+            .iter()
+            .filter(|r| r.depth == 1)
+            .map(|r| f64::from(r.w) * f64::from(r.h))
+            .sum();
+        assert!(
+            (child_area - inner_area).abs() < 2.0,
+            "children cover {child_area:.1} of {inner_area:.1} px²"
+        );
+    }
+
+    #[test]
+    fn an_unsubdividable_directory_is_marked_unexpanded() {
+        let index = index();
+        // Depth 1 leaves `docs` emitted but not descended into.
+        let rects = layout(
+            &[&index],
+            None,
+            &TreemapOptions {
+                max_depth: 1,
+                ..options()
+            },
+        );
+        let docs = rects.iter().find(|r| r.name == "docs").unwrap();
+        assert!(!docs.expanded, "past max depth: paints as a solid block");
+        assert!(!docs.headed, "no name strip without children below it");
+
+        let full = layout(&[&index], None, &options());
+        let docs = full.iter().find(|r| r.name == "docs").unwrap();
+        assert!(docs.expanded && docs.headed);
+    }
+
+    #[test]
+    fn the_per_directory_child_cap_folds_the_rest() {
+        let caps = crate::service::scan::ntfs_caps("C:".to_string());
+        let mut b = IndexBuilder::new(caps, CancellationToken::new());
+        let _ = b.push_batch(&[dir(5, 5, "")]);
+        let names: Vec<String> = (0..50).map(|i| format!("f-{i}.bin")).collect();
+        let files: Vec<RawEntry<'_>> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| file(100 + i as u64, 5, name, 10_000))
+            .collect();
+        let _ = b.push_batch(&files);
+        let index = b.finish().0;
+
+        let rects = layout(
+            &[&index],
+            None,
+            &TreemapOptions {
+                max_children: 10,
+                ..options()
+            },
+        );
+        let placed = rects.iter().filter(|r| !r.is_dir && !r.aggregate).count();
+        let aggregate = rects.iter().find(|r| r.aggregate).expect("capped tail");
+        assert_eq!(placed, 10);
+        assert_eq!(aggregate.allocated, 40 * 10_000);
     }
 
     #[test]

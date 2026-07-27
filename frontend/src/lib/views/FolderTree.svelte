@@ -135,10 +135,11 @@
     session.focus = { vol: row.vol, id: row.id };
   }
 
+  // Double-click deliberately does NOT drill the treemap (UI direction
+  // 2026-07-26): the map re-roots only from its own gestures. Double-click
+  // just expands/collapses, like every other tree control.
   function onRowDblClick(row: TreeRowDto) {
-    if (row.is_dir) {
-      session.drill = { vol: row.vol, id: row.id };
-    }
+    void toggle(row);
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -161,9 +162,9 @@
     } else if (e.key === "ArrowLeft" && open.has(keyOf(row))) {
       e.preventDefault();
       void toggle(row);
-    } else if (e.key === "Enter" && row.is_dir) {
+    } else if (e.key === "Enter" && row.has_children) {
       e.preventDefault();
-      session.drill = { vol: row.vol, id: row.id };
+      void toggle(row);
     }
   }
 

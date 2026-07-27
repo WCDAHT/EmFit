@@ -231,6 +231,32 @@ impl<'a> NonResident<'a> {
         }
         runs::decode(&self.data[offset..]).0
     }
+
+    /// Sum this fragment's run list without decoding it into a `Vec` —
+    /// cheap enough for the sweep to call on every non-resident stream.
+    pub fn run_summary(&self) -> runs::RunSummary {
+        let offset = read_u16(self.data, 0x20) as usize;
+        if offset >= self.data.len() {
+            return runs::RunSummary::default();
+        }
+        runs::summarize(&self.data[offset..])
+    }
+
+    /// Bytes genuinely backed by clusters, summed from the run list —
+    /// sparse runs contribute nothing.
+    ///
+    /// The header's [`Self::allocated_size`] can report the full *reserved*
+    /// span when the stream has holes; `$BadClus:$Bad` is the canonical
+    /// case, "allocating" the entire volume while owning zero clusters —
+    /// and on real volumes it does this **without** the sparse attribute
+    /// flag, so holes must be detected in the runs, not the flags. Covers
+    /// only this record's fragment; a holed stream fragmented across
+    /// extension records is undercounted, not overcounted.
+    pub fn allocated_from_runs(&self, bytes_per_cluster: u32) -> u64 {
+        self.run_summary()
+            .allocated_clusters
+            .saturating_mul(u64::from(bytes_per_cluster))
+    }
 }
 
 /// Walks a record's attribute chain.
@@ -661,6 +687,25 @@ mod tests {
         let nr = NonResident { data: &buf };
         assert_eq!(nr.compressed_size(), None);
         assert_eq!(nr.physical_size(), 4096);
+    }
+
+    #[test]
+    fn allocated_from_runs_counts_only_real_clusters() {
+        // 8 clusters at LCN 0x100, then a 100-cluster hole ($BadClus-style).
+        let runs = [0x21, 0x08, 0x00, 0x01, 0x01, 0x64, 0x00];
+        let buf = non_resident(0x80, 442_368, 442_368, &runs);
+        let nr = AttributeIter::new(&buf, 0)
+            .next()
+            .unwrap()
+            .non_resident()
+            .unwrap();
+
+        assert_eq!(nr.allocated_size(), 442_368, "the header claims the span");
+        assert_eq!(
+            nr.allocated_from_runs(4096),
+            8 * 4096,
+            "the runs say what is actually backed"
+        );
     }
 
     #[test]

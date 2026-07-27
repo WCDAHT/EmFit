@@ -504,7 +504,7 @@ fn progress_printer() -> impl FnMut(Progress) {
             }
         }
         Progress::Tick { done } => {
-            eprint!("\r  {done} entries");
+            eprint!("\r  {done}");
             let _ = std::io::stderr().flush();
             ticking = true;
         }

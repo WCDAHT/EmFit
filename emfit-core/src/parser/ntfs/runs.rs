@@ -95,6 +95,55 @@ pub fn decode(buf: &[u8]) -> (Vec<DataRun>, bool) {
     (runs, false)
 }
 
+/// What a run list adds up to, without decoding it into a `Vec`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunSummary {
+    /// Clusters backed by real disk locations.
+    pub allocated_clusters: u64,
+    /// Clusters in holes (sparse runs).
+    pub hole_clusters: u64,
+}
+
+impl RunSummary {
+    pub fn has_holes(&self) -> bool {
+        self.hole_clusters > 0
+    }
+}
+
+/// Sum a run list's allocated and hole clusters, allocation-free.
+///
+/// The sweep calls this for every non-resident stream, so unlike [`decode`]
+/// it builds nothing — one pass over the bytes, two counters. Same
+/// tolerance for truncation: a malformed tail yields what was summed.
+pub fn summarize(buf: &[u8]) -> RunSummary {
+    let mut summary = RunSummary::default();
+    let mut pos = 0usize;
+
+    while pos < buf.len() {
+        let header = buf[pos];
+        if header == 0 {
+            break;
+        }
+        pos += 1;
+
+        let len_size = usize::from(header & 0x0F);
+        let off_size = usize::from(header >> 4);
+        if len_size == 0 || len_size > 8 || off_size > 8 || pos + len_size + off_size > buf.len() {
+            break;
+        }
+
+        let cluster_count = read_unsigned(&buf[pos..pos + len_size]);
+        pos += len_size + off_size;
+
+        if off_size == 0 {
+            summary.hole_clusters = summary.hole_clusters.saturating_add(cluster_count);
+        } else {
+            summary.allocated_clusters = summary.allocated_clusters.saturating_add(cluster_count);
+        }
+    }
+    summary
+}
+
 /// Little-endian unsigned integer of 1–8 bytes.
 fn read_unsigned(bytes: &[u8]) -> u64 {
     let mut value = 0u64;
@@ -255,5 +304,38 @@ mod tests {
     #[test]
     fn empty_input_decodes_to_nothing() {
         assert_eq!(decode(&[]), (vec![], false));
+    }
+
+    #[test]
+    fn summarize_counts_holes_and_allocation_without_decoding() {
+        // 8 real @ 0x100, 16-cluster hole, 4 real.
+        let buf = [
+            0x21, 0x08, 0x00, 0x01, //
+            0x01, 0x10, //
+            0x21, 0x04, 0x10, 0x00, //
+            0x00,
+        ];
+        let s = summarize(&buf);
+        assert_eq!(s.allocated_clusters, 12);
+        assert_eq!(s.hole_clusters, 16);
+        assert!(s.has_holes());
+
+        // All-hole ($BadClus:$Bad shaped) and all-real lists.
+        let hole_only = summarize(&[0x02, 0x00, 0x10, 0x00]);
+        assert_eq!(hole_only.allocated_clusters, 0);
+        assert_eq!(hole_only.hole_clusters, 0x1000);
+
+        let real_only = summarize(&[0x21, 0x08, 0x00, 0x01, 0x00]);
+        assert!(!real_only.has_holes());
+        assert_eq!(real_only.allocated_clusters, 8);
+
+        // Agrees with the full decoder.
+        let (runs, _) = decode(&buf);
+        let allocated: u64 = runs
+            .iter()
+            .filter(|r| !r.is_sparse())
+            .map(|r| r.cluster_count)
+            .sum();
+        assert_eq!(allocated, s.allocated_clusters);
     }
 }

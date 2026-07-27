@@ -233,6 +233,70 @@ fn hard_links_and_alternate_streams_are_accounted_once() {
 }
 
 #[test]
+fn a_sparse_system_stream_does_not_count_the_volume_twice() {
+    // $BadClus:$Bad in miniature: a named stream whose header claims the
+    // whole volume as its span, backed by one all-sparse run. Counting the
+    // claimed span would add the entire disk a second time; the run list
+    // says it owns nothing.
+    // Crucially NO sparse flag on this stream: the real $BadClus:$Bad
+    // carries its volume-spanning hole without one, so hole detection must
+    // come from the run list, never the attribute flags.
+    let span = 1u64 << 40; // "1 TiB" of hole
+    let clusters = span / u64::from(CLUSTER);
+    let bad_stream =
+        named_non_resident_attr(0x80, "$Bad", span, span, &encode_sparse_run(clusters));
+
+    let spec = ImageSpec {
+        geometry: GEOMETRY_512N,
+        // 6 clusters × 4 records each: room for records 20 and 21 below.
+        fragments: vec![(4, 6)],
+        records: vec![
+            RecordSpec::new(5)
+                .directory()
+                .attr(file_name_attr(5, 3, ".")),
+            RecordSpec::new(20)
+                .attr(std_info_attr(FT_2024, FT_2024, 0x06))
+                .attr(file_name_attr(5, 3, "$BadClus"))
+                .attr(resident_attr(0x80, &[]))
+                .attr(bad_stream),
+            // A genuinely sparse user file: 16 real clusters, then a hole.
+            {
+                let mut runs = encode_runs(&[(60, 16)]);
+                runs.pop(); // drop the terminator; the hole continues the list
+                runs.extend_from_slice(&encode_sparse_run(1024));
+                let mut data = non_resident_attr(0x80, 5_000_000, 5_000_000, &runs);
+                set_attr_flags(&mut data, 0x8000);
+                RecordSpec::new(21)
+                    .attr(file_name_attr(5, 1, "sparse.dat"))
+                    .attr(data)
+            },
+        ],
+    };
+
+    let mut sink = ValidatingSink::new(RecordingSink::new());
+    let outcome = sweep_into(&spec, "badclus", &mut sink);
+    let (recorded, violations) = sink.into_parts();
+    assert!(violations.is_empty(), "{violations:?}");
+
+    let badclus = recorded.find("$BadClus").expect("metafile emitted");
+    assert_eq!(badclus.allocated, 0, "the hole costs nothing on disk");
+    assert_eq!(badclus.size, 0, "its own unnamed $DATA is empty");
+
+    let ads = outcome.ads.iter().find(|a| a.name == "$Bad").unwrap();
+    assert_eq!(ads.size, span, "the logical span is still reported");
+    assert_eq!(ads.allocated, 0, "but occupies nothing");
+    assert_eq!(outcome.stats.ads_bytes, 0);
+
+    let sparse = recorded.find("sparse.dat").expect("sparse user file");
+    assert_eq!(sparse.size, 5_000_000);
+    assert_eq!(
+        sparse.allocated,
+        16 * u64::from(CLUSTER),
+        "only the written clusters count, not the reserved span"
+    );
+}
+
+#[test]
 fn extension_records_are_joined_without_seeking() {
     let spec = ImageSpec {
         geometry: GEOMETRY_512N,

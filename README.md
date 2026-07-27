@@ -53,9 +53,13 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
     counts, lazy expansion (100k-child folders open instantly), and keyboard
     navigation;
   - a **treemap** whose squarified layout is computed in Rust and painted on
-    a canvas — drill down (double-click), breadcrumb, hover tooltips, color
-    by file type (with legend) or by folder, adjustable depth, and free
-    space drawn as a block so the map accounts for the whole volume;
+    a canvas, WizTree-style: files as plain 1px-bordered boxes, folders with
+    a reserved `name\ (999 GiB)` strip — drill down (double-click),
+    breadcrumb, hover tooltips, adjustable depth, a height splitter, and
+    free space drawn as a block so the map accounts for the whole volume.
+    Colors follow **size buckets** (WizTree-style) or extension categories;
+    both the mode and the buckets (ranges + colors) are editable in
+    *Colors…* and persist in the appdata config;
   - a **file types** panel (what kind of thing is eating the disk); ticking
     types dims the map and filters the list;
   - **Top files / Top folders** shortcuts, and a logical-vs-on-disk size

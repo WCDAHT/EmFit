@@ -373,10 +373,16 @@ pub fn treemap_layout(
     let indices: Vec<&emfit_core::model::index::Index> =
         inner.volumes.iter().map(|v| v.index.as_ref()).collect();
 
+    // Depth 0 means "max": recursion is bounded by pixel size either way,
+    // so unlimited depth costs no more than the canvas can show.
     let options = TreemapOptions {
         width,
         height,
-        max_depth: depth.clamp(1, 12),
+        max_depth: if depth == 0 {
+            u8::MAX
+        } else {
+            depth.clamp(1, 64)
+        },
         ..TreemapOptions::default()
     };
     treemap::layout(&indices, drill.map(|d| (d.vol, d.id)), &options)

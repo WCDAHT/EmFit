@@ -14,6 +14,7 @@ import type {
   RawQueryDto,
   ScanTarget,
   SelectionSummaryDto,
+  SizeRange,
   SortKey,
   VolumeDto,
 } from "./types";
@@ -71,8 +72,15 @@ export const session = $state({
   focus: null as NodeRef | null,
   /** Bumped when focus changes from the treemap so the tree reveals it. */
   revealEpoch: 0,
-  treemapDepth: 5,
-  colorMode: "type" as "type" | "folder",
+  treemapDepth: 0,
+  /** Coloring rule, mirroring the persisted `config.treemap` (WizTree-style
+   *  size buckets, or the extension category palette). */
+  colorMode: "size" as "size" | "extension",
+  /** Size buckets from config, ascending; last is the catch-all. */
+  sizeRanges: [] as SizeRange[],
+  /** Fixed height of the treemap row, set by the splitter on drag release;
+   *  null = the default flex split. */
+  treemapHeight: null as number | null,
   /** Show logical size or size on disk as the primary number. The treemap's
    *  geometry always uses allocated (features.md §4.2). */
   sizeMode: "allocated" as "allocated" | "logical",

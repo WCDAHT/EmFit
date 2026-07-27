@@ -63,11 +63,42 @@ goes stale.
 - [ ] Replace the placeholder app icon with real EmFit artwork
       (`app-icon.svg` at the repo root, then `npx tauri icon ./app-icon.svg`).
 
+## Tree view direction settled with the user (2026-07-26, round 2)
+
+- Scan chips show a real progress bar (native `<progress>`): indeterminate
+  until the `$MFT` bitmap yields the expected count, determinate after.
+- Treemap paints WizTree's grammar: files = unlabeled 1px-bordered boxes
+  packed edge to edge; folders = 1px padding + a reserved name strip
+  (`name\ (999 GiB)`). The strip height is 14px and lives in the *Rust*
+  layout (`TreemapOptions::dir_header_px`); the frontend constant
+  `HEADER_PX` in Treemap.svelte must match it.
+- Colors: size buckets (default) or extension categories; mode + buckets
+  persist in `config.toml` (`[treemap]`), edited via the Colors… dialog.
+- Tree-list double-click must NOT re-root the treemap; drilling happens
+  only from the map (double-click / breadcrumb).
+- Treemap height set by a splitter that applies on drag **release** only.
+- Tooltip cannot leave the window: DOM is clipped to the webview. Escaping
+  the frame would need a separate borderless always-on-top OS window —
+  noted as not worth it for now.
+
 ## Notes / decisions worth remembering
 
 - ADS accounting: a stream's **allocated** bytes fold into its owner's
   allocated size; logical size is reported only in the side table, because
   `$BadClus:$Bad` logically spans the whole volume while occupying nothing.
+- Sparse streams (fixed 2026-07-27): a sparse attribute with no compression
+  unit reports its full *reserved* span as `allocated_size` — `$BadClus`
+  showed as a volume-sized file. Sparse streams now sum their run list
+  (holes = 0); multi-fragment sparse attrs are undercounted, never over.
+- Multi-volume parallelism follows physical disks (fixed 2026-07-27): the
+  user's C: and D: are two partitions of one SSD, and scanning them at once
+  dropped D: from 292 → 111 MiB/s and made both finish later. `scan_volumes`
+  now lanes targets by `disk_number` — parallel across disks, sequential
+  within one. BenchLog caught it.
+- Treemap perf lessons: never call a hover-reading fn synchronously inside
+  the scene effect (Svelte tracks the whole call tree — defer via rAF);
+  keep hot-loop data out of `$state` proxies (`$state.raw` + palette
+  snapshot); scene on an offscreen layer, hover = blit + outlines.
 - The free-space row is synthetic (`EntryFlags::SYNTHETIC`), parented to the
   root, pushed by `service::scan` — scanners never see it.
 - Display collation (sort) deliberately uses the simple fold, not per-volume

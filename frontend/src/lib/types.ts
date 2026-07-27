@@ -7,6 +7,19 @@
 export interface AppConfig {
   schema_version: number;
   theme: "dark" | "light" | null;
+  treemap: TreemapConfig;
+}
+
+/** Mirror of `TreemapConfig`: how the treemap colors rectangles. */
+export interface TreemapConfig {
+  color_mode: string; // "size" | "extension"
+  size_ranges: SizeRange[];
+}
+
+/** One size→color bucket (ascending; last is the catch-all). */
+export interface SizeRange {
+  max_bytes: number;
+  color: string;
 }
 
 // Mirror of `ProgressDto` (a `#[serde(tag = "kind")]` enum).
@@ -161,6 +174,9 @@ export interface TreemapRectDto {
   synthetic: boolean;
   category: number;
   branch: number;
+  headed: boolean;
+  expanded: boolean;
+  aggregate: boolean;
   name: string;
   size: number;
   allocated: number;

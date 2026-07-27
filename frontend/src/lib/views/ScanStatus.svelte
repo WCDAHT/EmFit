@@ -11,6 +11,9 @@
     if (!s) return "";
     switch (s.phase) {
       case "scanning":
+        if (s.total !== null && s.total > 0 && s.done > 0) {
+          return `${s.message} — ${s.done.toLocaleString()} / ${s.total.toLocaleString()}`;
+        }
         return s.done > 0 ? `${s.message} — ${s.done.toLocaleString()}` : s.message;
       case "done":
         return s.summary ?? "done";
@@ -37,6 +40,16 @@
       {@const s = session.scan[t.key]}
       <span class="chip" class:error={s.phase === "error"} class:done={s.phase === "done"}>
         <span class="name">{t.label}</span>
+        {#if s.phase === "scanning"}
+          <!-- Native <progress>: with a total it is determinate; without a
+               value it renders the indeterminate animation — exactly the
+               "indeterminate until the file count is known" behavior. -->
+          {#if s.total !== null && s.total > 0}
+            <progress max={s.total} value={Math.min(s.done, s.total)}></progress>
+          {:else}
+            <progress></progress>
+          {/if}
+        {/if}
         {chipText(t.key)}
       </span>
     {/each}
@@ -88,6 +101,11 @@
   .chip .name {
     color: var(--text-primary);
     font-weight: var(--font-weight-semibold);
+  }
+  .chip progress {
+    width: 120px;
+    height: 8px;
+    accent-color: var(--accent);
   }
   .chip.error {
     border-color: var(--danger);

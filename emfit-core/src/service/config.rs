@@ -61,6 +61,9 @@ pub struct Config {
     /// Selected UI theme: `"dark"`, `"light"`, or `None` to follow the OS.
     /// The worked example of a persisted setting â€” replace/extend per app.
     pub theme: Option<String>,
+
+    /// Treemap coloring, edited from the Tree view's settings dialog.
+    pub treemap: TreemapConfig,
     // --- add further settings here (window geometry, recent files, â€¦) ---
 }
 
@@ -69,6 +72,59 @@ impl Default for Config {
         Self {
             schema_version: SCHEMA_VERSION,
             theme: None,
+            treemap: TreemapConfig::default(),
+        }
+    }
+}
+
+/// How the treemap colors its rectangles. Both the mode and the size buckets
+/// are user-editable and persist here, per the UI direction of 2026-07-26.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TreemapConfig {
+    /// `"size"` (WizTree-style buckets by file size) or `"extension"`
+    /// (the category palette).
+    pub color_mode: String,
+    /// Ascending buckets: a file takes the color of the first range whose
+    /// `max_bytes` covers it; anything larger takes the last range's color.
+    pub size_ranges: Vec<SizeRange>,
+}
+
+/// One color bucket. `max_bytes` stays within `i64` because the TOML format
+/// has no unsigned 64-bit integers; the last bucket is a catch-all anyway.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SizeRange {
+    pub max_bytes: u64,
+    /// `#rrggbb`.
+    pub color: String,
+}
+
+impl Default for TreemapConfig {
+    fn default() -> Self {
+        Self {
+            color_mode: "size".to_string(),
+            size_ranges: vec![
+                SizeRange {
+                    max_bytes: 1 << 20, // ≤ 1 MiB
+                    color: "#4f8cc9".to_string(),
+                },
+                SizeRange {
+                    max_bytes: 16 << 20, // ≤ 16 MiB
+                    color: "#3fb950".to_string(),
+                },
+                SizeRange {
+                    max_bytes: 256 << 20, // ≤ 256 MiB
+                    color: "#e3b341".to_string(),
+                },
+                SizeRange {
+                    max_bytes: 1 << 30, // ≤ 1 GiB
+                    color: "#f0883e".to_string(),
+                },
+                SizeRange {
+                    max_bytes: 1 << 60, // catch-all
+                    color: "#f85149".to_string(),
+                },
+            ],
         }
     }
 }
@@ -203,8 +259,8 @@ mod tests {
     fn save_then_load_roundtrips() {
         let path = tmp_path("roundtrip");
         let cfg = Config {
-            schema_version: SCHEMA_VERSION,
             theme: Some("light".to_string()),
+            ..Config::default()
         };
         cfg.save_to(&path).unwrap();
         let loaded = Config::load_from(&path).unwrap();

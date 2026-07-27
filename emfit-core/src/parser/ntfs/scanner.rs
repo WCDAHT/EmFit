@@ -75,7 +75,9 @@ use crate::error::{Error, Result};
 use crate::model::entry::{EntryFlags, RawEntry, Times};
 use crate::model::sink::{EntrySink, ScanWarning};
 use crate::parser::block::{AlignedBuf, BlockSource};
-use crate::parser::ntfs::attr::{self, AttributeType, FileName, Namespace, StandardInfo};
+use crate::parser::ntfs::attr::{
+    self, AttributeType, FileName, Namespace, NonResident, StandardInfo,
+};
 use crate::parser::ntfs::bitmap;
 use crate::parser::ntfs::bootstrap::MftLayout;
 use crate::parser::ntfs::record::{Record, RecordHeader};
@@ -261,11 +263,12 @@ pub fn sweep(
 
     let record_size = u64::from(layout.boot.bytes_per_record);
     let bytes_per_sector = layout.boot.bytes_per_sector;
+    let bytes_per_cluster = layout.boot.bytes_per_cluster;
     let total_records = layout.records_to_scan().min(layout.capacity_records());
 
-    // The bitmap turns "slots ever written" into "files actually here", which
-    // is what progress should count against. Failing to read it costs accuracy,
-    // not correctness.
+    // The bitmap turns "slots ever written" into "files actually here" — a
+    // stats cross-check, not the progress denominator. Failing to read it
+    // costs nothing but that check.
     if layout.has_bitmap() {
         match bitmap::read(
             source,
@@ -284,8 +287,12 @@ pub fn sweep(
         }
     }
 
-    let expected = stats.bitmap_in_use.unwrap_or(total_records);
-    progress(Progress::started("Reading the MFT", Some(expected)));
+    // Progress tracks the read position through the WHOLE table, free slots
+    // included. Counting files found instead freezes the bar early on any
+    // volume that once held more files than it does now: the MFT never
+    // shrinks, and the free tail (60% of the table on a churned drive) still
+    // has to be read.
+    progress(Progress::started("Reading the MFT", Some(total_records)));
 
     let records_per_chunk = (options.chunk_bytes as u64 / record_size).max(1);
     let chunk_bytes = (records_per_chunk * record_size) as usize;
@@ -376,6 +383,7 @@ pub fn sweep(
                 chunk.first_record,
                 record_size as usize,
                 bytes_per_sector,
+                bytes_per_cluster,
             );
 
             let mut broke = false;
@@ -406,7 +414,7 @@ pub fn sweep(
 
             if last_tick.elapsed() >= options.progress_interval {
                 progress(Progress::Tick {
-                    done: stats.entries_emitted,
+                    done: stats.records_read,
                 });
                 last_tick = Instant::now();
             }
@@ -463,6 +471,7 @@ fn parse_chunk(
     first_record: u64,
     record_size: usize,
     bytes_per_sector: u32,
+    bytes_per_cluster: u32,
 ) -> Vec<WorkerOut> {
     chunk
         .par_chunks_exact_mut(record_size)
@@ -472,6 +481,7 @@ fn parse_chunk(
                 first_record + index as u64,
                 record_bytes,
                 bytes_per_sector,
+                bytes_per_cluster,
                 &mut out,
             );
             out
@@ -753,9 +763,38 @@ fn resolve_held(
 // per-record parsing
 // ---------------------------------------------------------------------------
 
+/// What a non-resident stream really costs on disk.
+///
+/// Compressed streams carry the true figure in their header. For everything
+/// else the run list is checked for holes: a holed stream reports the full
+/// *reserved* span as its allocated size, and `$BadClus:$Bad` — the whole
+/// volume as one hole — does so **without** setting the sparse flag, so the
+/// flag cannot be trusted. When the runs show no holes the header's figure
+/// is used, because a multi-fragment stream's VCN-0 header covers the whole
+/// stream while its runs cover only this fragment.
+fn stream_physical(nr: &NonResident<'_>, bytes_per_cluster: u32) -> u64 {
+    if let Some(compressed) = nr.compressed_size() {
+        return compressed;
+    }
+    let summary = nr.run_summary();
+    if summary.has_holes() {
+        summary
+            .allocated_clusters
+            .saturating_mul(u64::from(bytes_per_cluster))
+    } else {
+        nr.allocated_size()
+    }
+}
+
 /// Parse one record into a worker's scratch: emit it, or hold it back for
 /// [`resolve_held`].
-fn parse_one(number: u64, record_bytes: &mut [u8], bytes_per_sector: u32, out: &mut WorkerOut) {
+fn parse_one(
+    number: u64,
+    record_bytes: &mut [u8],
+    bytes_per_sector: u32,
+    bytes_per_cluster: u32,
+    out: &mut WorkerOut,
+) {
     let stats = &mut out.stats;
 
     // Cheapest check first: a free record needs no repair and no walking, and a
@@ -873,7 +912,7 @@ fn parse_one(number: u64, record_bytes: &mut [u8], bytes_per_sector: u32, out: &
                             // What it costs, not the virtual range it spans —
                             // those differ for every compressed and sparse
                             // file.
-                            fields.allocated = nr.physical_size();
+                            fields.allocated = stream_physical(&nr, bytes_per_cluster);
                             fields.has_data = true;
                         }
                     } else if let Some(value) = attribute.resident_value() {
@@ -886,7 +925,9 @@ fn parse_one(number: u64, record_bytes: &mut [u8], bytes_per_sector: u32, out: &
                 } else {
                     // An alternate data stream.
                     let (size, allocated) = match attribute.non_resident() {
-                        Some(nr) if nr.starting_vcn() == 0 => (nr.data_size(), nr.physical_size()),
+                        Some(nr) if nr.starting_vcn() == 0 => {
+                            (nr.data_size(), stream_physical(&nr, bytes_per_cluster))
+                        }
                         Some(_) => continue, // later fragment of a stream already seen
                         None => match attribute.resident_value() {
                             Some(value) => (value.len() as u64, 0),

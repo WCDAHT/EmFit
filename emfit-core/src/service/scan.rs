@@ -226,6 +226,13 @@ pub fn scan_image(
 
 /// Scan several volumes at once, one thread each.
 ///
+/// Parallelism follows the **physical disks**, not the volume list: volumes
+/// on different disks scan concurrently, volumes sharing a disk scan one
+/// after another. Two partitions of one SSD scanned at once halve each
+/// other's sequential bandwidth and both finish late — "C: and D: at once
+/// is nearly free" holds only when they are separate spindles/SSDs
+/// (features.md §1.2).
+///
 /// Failure is isolated per volume: the result slot for a drive that refused
 /// access carries its error, and every other drive completes normally.
 /// Progress events arrive tagged with the volume's position in `volumes`.
@@ -235,28 +242,73 @@ pub fn scan_volumes(
     on_progress: &(dyn Fn(usize, Progress) + Sync),
     cancel: &CancellationToken,
 ) -> Vec<Result<VolumeScanOutcome>> {
+    let groups = group_by_disk(volumes);
+    if groups.iter().any(|group| group.len() > 1) {
+        tracing::info!(
+            volumes = volumes.len(),
+            lanes = groups.len(),
+            "volumes share a physical disk; scanning same-disk volumes sequentially"
+        );
+    }
+
+    let mut results: Vec<Option<Result<VolumeScanOutcome>>> =
+        (0..volumes.len()).map(|_| None).collect();
+
     std::thread::scope(|s| {
-        let handles: Vec<_> = volumes
-            .iter()
-            .enumerate()
-            .map(|(i, volume)| {
+        let handles: Vec<_> = groups
+            .into_iter()
+            .map(|group| {
                 s.spawn(move || {
-                    let mut progress = |p: Progress| on_progress(i, p);
-                    scan_volume(volume, options, &mut progress, cancel)
+                    group
+                        .into_iter()
+                        .map(|i| {
+                            let mut progress = |p: Progress| on_progress(i, p);
+                            (i, scan_volume(&volumes[i], options, &mut progress, cancel))
+                        })
+                        .collect::<Vec<_>>()
                 })
             })
             .collect();
 
-        handles
-            .into_iter()
-            .map(|handle| match handle.join() {
-                Ok(result) => result,
+        for handle in handles {
+            match handle.join() {
+                Ok(lane) => {
+                    for (i, result) in lane {
+                        results[i] = Some(result);
+                    }
+                }
                 // A panic is a bug in the scanner, not a property of the
                 // volume; hiding it as a scan error would bury it.
                 Err(payload) => std::panic::resume_unwind(payload),
-            })
-            .collect()
-    })
+            }
+        }
+    });
+
+    results
+        .into_iter()
+        .map(|slot| slot.expect("every volume lands in exactly one lane"))
+        .collect()
+}
+
+/// Partition volume indices into scan lanes, one per physical disk.
+///
+/// A volume whose disk is unknown (spanned, or no partition location) gets
+/// its own lane — the safe default, since nothing proves it shares media.
+fn group_by_disk(volumes: &[VolumeInfo]) -> Vec<Vec<usize>> {
+    let mut lanes: Vec<(Option<u32>, Vec<usize>)> = Vec::new();
+    for (i, volume) in volumes.iter().enumerate() {
+        match volume.location.map(|l| l.disk_number) {
+            Some(disk) => {
+                if let Some((_, lane)) = lanes.iter_mut().find(|(key, _)| *key == Some(disk)) {
+                    lane.push(i);
+                } else {
+                    lanes.push((Some(disk), vec![i]));
+                }
+            }
+            None => lanes.push((None, vec![i])),
+        }
+    }
+    lanes.into_iter().map(|(_, lane)| lane).collect()
 }
 
 /// Open the volume for raw reading, honouring the requested mode.
@@ -471,6 +523,44 @@ fn log_bench(label: &str, started: Instant, result: &Result<VolumeScanOutcome>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::volume::{FilesystemKind, PartitionLocation};
+
+    fn volume_on(disk: Option<u32>) -> VolumeInfo {
+        VolumeInfo {
+            guid_path: String::new(),
+            mount_points: Vec::new(),
+            label: None,
+            filesystem: FilesystemKind::Ntfs,
+            serial: 0,
+            bytes_per_sector: 512,
+            bytes_per_cluster: 4096,
+            total_bytes: 0,
+            free_bytes: 0,
+            location: disk.map(|disk_number| PartitionLocation {
+                disk_number,
+                starting_offset: 0,
+                length: 0,
+            }),
+        }
+    }
+
+    #[test]
+    fn volumes_sharing_a_disk_scan_in_one_lane() {
+        // C: and D: on disk 0 (one SSD, two partitions), E: on disk 1,
+        // one spanned volume with no single disk.
+        let volumes = vec![
+            volume_on(Some(0)), // C:
+            volume_on(Some(1)), // E:
+            volume_on(Some(0)), // D:
+            volume_on(None),    // spanned
+        ];
+
+        let lanes = group_by_disk(&volumes);
+        assert_eq!(lanes.len(), 3, "disk 0, disk 1, and the unknown");
+        assert_eq!(lanes[0], vec![0, 2], "same disk → sequential lane");
+        assert_eq!(lanes[1], vec![1]);
+        assert_eq!(lanes[2], vec![3]);
+    }
 
     #[test]
     fn ntfs_caps_declare_what_ntfs_actually_has() {

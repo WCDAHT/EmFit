@@ -6,7 +6,7 @@
   "scripts": {
     "gen-license": "node scripts/generate-credits.js",
     "dev": "cd frontend && vite",
-    "build": "npm run gen-license && cd frontend && svelte-check --tsconfig ./tsconfig.json && vite build",
+    "build": "cd frontend && svelte-check --tsconfig ./tsconfig.json && vite build",
     "preview": "cd frontend && vite preview",
     "check": "cd frontend && svelte-check --tsconfig ./tsconfig.json",
     "test": "cd frontend && vitest run",

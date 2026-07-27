@@ -20,7 +20,7 @@
   import TreeView from "./lib/views/TreeView.svelte";
   import StatusBar from "./lib/views/StatusBar.svelte";
   import { toggleThemeMode, syncThemeWithConfig } from "./lib/theme";
-  import { cancelScan, listVolumes } from "./lib/ipc";
+  import { cancelScan, getConfig, listVolumes } from "./lib/ipc";
   import {
     session,
     hooks,
@@ -107,8 +107,15 @@
       }),
     ];
 
-    // Reconcile the first-paint theme cache with the durable config.
+    // Reconcile the first-paint theme cache with the durable config, and
+    // project the persisted treemap coloring into the session.
     void syncThemeWithConfig();
+    void getConfig().then((cfg) => {
+      if (cfg.treemap) {
+        session.colorMode = cfg.treemap.color_mode === "extension" ? "extension" : "size";
+        session.sizeRanges = cfg.treemap.size_ranges ?? [];
+      }
+    });
 
     return () => {
       for (const p of unlisteners) void p.then((unlisten) => unlisten());
