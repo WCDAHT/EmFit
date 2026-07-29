@@ -73,10 +73,13 @@ export const session = $state({
   /** Bumped when focus changes from the treemap so the tree reveals it. */
   revealEpoch: 0,
   treemapDepth: 0,
-  /** Coloring rule, mirroring the persisted `config.treemap` (WizTree-style
-   *  size buckets, or the extension category palette). */
-  colorMode: "size" as "size" | "extension",
-  /** Size buckets from config, ascending; last is the catch-all. */
+  /** Coloring rule, mirroring the persisted `config.treemap`: "ranked" =
+   *  WizTree's palette assigned to extensions by total-size rank;
+   *  "extension" = the category palette (per-extension configurable list is
+   *  a future milestone). */
+  colorMode: "ranked" as "ranked" | "extension",
+  /** Legacy size buckets from config (retired mode); kept only so saves
+   *  round-trip the persisted data. */
   sizeRanges: [] as SizeRange[],
   /** Fixed height of the treemap row, set by the splitter on drag release;
    *  null = the default flex split. */

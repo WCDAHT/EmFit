@@ -5,6 +5,33 @@
 //! hundreds of thousands of nested rectangles in JS is not viable; painting a
 //! precomputed list on a canvas is.
 //!
+//! # Layout, WizTree-style
+//!
+//! The geometry follows WizTree's recovered pipeline
+//! (logs/wiztree_treemap_algorithm.md), minus the cushion shading:
+//!
+//! - **Root children are full-height vertical strips** (§3.8), each width
+//!   rounded independently from its own share, swept left to right with a
+//!   1px gap. This level is a plain proportional split, *not* squarified —
+//!   the 2-D squarify starts one level down. A drill is WizTree's zoom mode
+//!   (§3.11): the focused node fills the whole frame.
+//! - **Labelled folders carve a header strip** off the top *before* their
+//!   children are partitioned (§5.4): the child area shrinks to
+//!   `{x+2, y+(minLabelH+1), w−4, h−(minLabelH+2)}`, so no child ever
+//!   overlaps the label. Unlabelled folders hand children their entire
+//!   rectangle — no header gap, no frame. Labels gate on BOTH thresholds
+//!   ([`LABEL_MIN_H`], [`LABEL_MIN_W`]) and always carry the size string;
+//!   file labels overdraw their block and have no layout effect (§5.3).
+//! - **The squarify partition is §6 verbatim**: rows grow while the worst
+//!   aspect ratio improves (degenerate ratios zeroed via a `1e-5` epsilon,
+//!   ±INF collapsed to 0), thickness and totals recompute per strip from the
+//!   leftover rectangle, the strip advance is floored at 0.25px, a leftover
+//!   under 0.25px on its short side is handed whole to every remaining
+//!   child, and past 1000 strips (or sibling 49999) items get zero rects.
+//! - **Child rects snap to integer pixel edges before recursing** (§5.4), so
+//!   siblings share the rounded boundary and the tiling stays exact.
+//! - **Recursion stops below 1px** in either dimension (§5.1).
+//!
 //! # Geometry is allocated bytes, always
 //!
 //! Rectangles are sized by **allocated** size, not logical size — confirmed
@@ -15,13 +42,15 @@
 //! free-space row fills the volume out to its capacity. Labels may still
 //! show logical size; only the geometry is allocated.
 //!
-//! # Cost model
+//! # Web adjustments
 //!
-//! Recursion stops when a rectangle drops below [`TreemapOptions::min_area`]
-//! or [`TreemapOptions::max_depth`], so the output is bounded by *pixels*,
-//! not by index size — a 5M-file volume and a 5K-file volume produce
-//! similarly sized lists. That is what keeps any drill level under the
-//! 100 ms budget (roadmap M3).
+//! WizTree simply leaves sub-pixel rectangles undrawn; over IPC we cannot
+//! afford blank space or unbounded payloads, so three knobs remain ours:
+//! recursion also stops at [`TreemapOptions::max_depth`], children below
+//! [`TreemapOptions::min_area`] (or past [`TreemapOptions::max_children`])
+//! fold into one aggregate rectangle per directory, and the output stays
+//! bounded by *pixels*, not by index size — a 5M-file volume and a 5K-file
+//! volume produce similarly sized lists (roadmap M3, 100 ms budget).
 
 use crate::model::index::{Index, NodeId};
 use crate::service::filetype::FileKind;
@@ -31,9 +60,20 @@ use crate::service::view::human_size;
 /// real node; actions must ignore it.
 pub const AGGREGATE_ID: u32 = u32::MAX;
 
-/// Directories whose inner area is below this many px² are not subdivided;
-/// they paint as solid blocks instead (children would be sub-pixel).
-const RECURSE_MIN_AREA: f64 = 32.0;
+/// WizTree's recursion guard: a rectangle under 1px in either dimension is
+/// never subdivided.
+const MIN_SIDE: f64 = 1.0;
+
+/// Label thresholds (§3.7: `MulDiv(12|80, DPI, 96)` — the webview is always
+/// logical-96-dpi pixels). Both gate the WHOLE label: a folder is labelled
+/// when `h > 12 && w >= 80` (§5.4), a leaf when `h > 12 && w > 80` (§5.3 —
+/// strict on both). A drawn label always carries the size string.
+const LABEL_MIN_H: f64 = 12.0;
+const LABEL_MIN_W: f64 = 80.0;
+
+/// Folder header strip height (`minLabelHeight` + breathing room in §5.4's
+/// carve formula). The frontend's `HEADER_PX` must match.
+const HEADER_PX: f64 = 14.0;
 
 /// One rectangle to paint. Coordinates are canvas pixels, origin top-left.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,12 +94,16 @@ pub struct TreemapRect {
     /// Which depth-1 subtree of the drill root this rectangle falls under —
     /// the key for color-by-folder. Depth-0 rects use their own ordinal.
     pub branch: u16,
-    /// This directory rect reserved [`TreemapOptions::dir_header_px`] at its
-    /// top for the name strip; its children are laid out below it.
+    /// Labelled: the rect clears BOTH label thresholds ([`LABEL_MIN_H`],
+    /// [`LABEL_MIN_W`] — §5.3/§5.4). For an `expanded` directory this means
+    /// a [`HEADER_PX`] header strip was carved off the top and children tile
+    /// **below** it; for everything else (files, aggregates, unexpanded
+    /// directories) the label overdraws the block and has no layout effect.
     pub headed: bool,
-    /// This directory's children were laid out inside it. False for a
-    /// directory too small (or too deep) to subdivide — paint those as solid
-    /// blocks, since nothing tiles them.
+    /// This directory's children were laid out inside it — tiling its
+    /// rectangle (below the header strip when `headed`), so its own fill
+    /// never shows. False for a directory too small (or too deep) to
+    /// subdivide — paint those as solid blocks, since nothing tiles them.
     pub expanded: bool,
     /// A tail of items too small to place individually, folded into one
     /// rectangle so the parent tiles completely. `id` is [`AGGREGATE_ID`].
@@ -83,14 +127,6 @@ pub struct TreemapOptions {
     /// At most this many individually-placed children per directory; the
     /// rest aggregate. Bounds the IPC payload on pathological flat folders.
     pub max_children: usize,
-    /// Height reserved at the top of a directory rect for its name strip
-    /// (`name\ (999 GB)`), when the rect is tall enough to afford it —
-    /// children tile the space **below** the strip, WizTree-style.
-    pub dir_header_px: f32,
-    /// Padding between a directory's border and its children, on every
-    /// side. This is the only spacing in the map: files tile edge to edge,
-    /// so the padding is what keeps each folder's border readable.
-    pub dir_padding_px: f32,
 }
 
 impl Default for TreemapOptions {
@@ -101,8 +137,6 @@ impl Default for TreemapOptions {
             max_depth: 6,
             min_area: 2.0,
             max_children: 2000,
-            dir_header_px: 14.0,
-            dir_padding_px: 2.0,
         }
     }
 }
@@ -124,23 +158,27 @@ impl Rect {
         self.w.min(self.h)
     }
 
-    /// Shrink by `px` on every side, for the nested-container look.
-    fn inset(&self, px: f64) -> Rect {
-        let px = px.min(self.w / 2.0).min(self.h / 2.0);
+    /// Snap to integer pixel edges the way WizTree rounds each child rect
+    /// before recursing: `Round(x), Round(y), Round(x+w), Round(y+h)`.
+    /// Adjacent cells share the exact float boundary, so they share the
+    /// rounded one too — the tiling stays gapless.
+    fn rounded(&self) -> Rect {
+        let x0 = self.x.round();
+        let y0 = self.y.round();
         Rect {
-            x: self.x + px,
-            y: self.y + px,
-            w: self.w - 2.0 * px,
-            h: self.h - 2.0 * px,
+            x: x0,
+            y: y0,
+            w: (self.x + self.w).round() - x0,
+            h: (self.y + self.h).round() - y0,
         }
     }
 }
 
 /// Lay out the treemap for the current drill level.
 ///
-/// `drill: None` maps every scanned volume into one canvas, split by volume
-/// size (features.md §4.2 multi-volume). `Some((vol, id))` fills the canvas
-/// with that node's subtree.
+/// `drill: None` slices every scanned volume into a full-height column ∝ its
+/// size, WizTree's root strip (features.md §4.2 multi-volume). `Some((vol,
+/// id))` is zoom mode: that node's subtree fills the whole canvas.
 pub fn layout(
     indices: &[&Index],
     drill: Option<(u16, u32)>,
@@ -153,8 +191,8 @@ pub fn layout(
     let canvas = Rect {
         x: 0.0,
         y: 0.0,
-        w: f64::from(options.width),
-        h: f64::from(options.height),
+        w: f64::from(options.width).round(),
+        h: f64::from(options.height).round(),
     };
 
     match drill {
@@ -176,7 +214,10 @@ pub fn layout(
             );
         }
         None => {
-            // Every volume in one map, weighted by what it holds.
+            // WizTree's root strip: every volume is a full-height vertical
+            // column, width ∝ what it holds, swept left to right. Column
+            // edges come from the cumulative share (no drift), rounded to
+            // integers, with a 1px gap between columns.
             let items: Vec<(usize, f64)> = indices
                 .iter()
                 .enumerate()
@@ -186,31 +227,49 @@ pub fn layout(
                 })
                 .filter(|&(_, weight)| weight > 0.0)
                 .collect();
+            let total: f64 = items.iter().map(|(_, w)| w).sum();
+            if total <= 0.0 {
+                return out;
+            }
 
-            squarify(&items, canvas, |&(slot, _), rect| {
+            // §3.8: each strip's width rounds independently from its own
+            // share (`rightEdge = leftCursor + round(totalWidth·share)`), so
+            // the last strip may over/undershoot the frame edge by a pixel —
+            // WizTree accepts that, and the canvas clips it.
+            let mut x = canvas.x;
+            for &(slot, weight) in &items {
+                let strip_w = (canvas.w * (weight / total)).round();
+                let column = Rect {
+                    x,
+                    y: canvas.y,
+                    w: strip_w,
+                    h: canvas.h,
+                };
+                x += strip_w + 1.0;
+
                 let index = indices[slot];
                 let vol = slot as u16;
-                let at = emit(&mut out, vol, index, index.root(), rect, 0, slot as u16);
+                let at = emit(&mut out, vol, index, index.root(), column, 0, slot as u16);
                 maybe_descend(
                     index,
                     vol,
                     index.root(),
                     at,
-                    rect,
+                    column,
                     1,
                     Some(slot as u16),
                     options,
                     &mut out,
                 );
-            });
+            }
         }
     }
     out
 }
 
 /// Subdivide an emitted directory rect when depth and size allow, marking
-/// `expanded`/`headed` on it accordingly. A directory left unexpanded paints
-/// as a solid block, so no space is ever blank.
+/// `expanded` on it accordingly. A directory left unexpanded paints as a
+/// solid block, so no space is ever blank.
 #[allow(
     clippy::too_many_arguments,
     reason = "internal recursion; bundling these into a context struct would only rename the arguments"
@@ -229,32 +288,26 @@ fn maybe_descend(
     if !index.node(id).is_directory() {
         return;
     }
-    let (inner, headed) = child_area(rect, options);
-    if child_depth > options.max_depth || inner.area() < RECURSE_MIN_AREA {
+    // A labelled folder carves its header strip off the top BEFORE the
+    // partition (§5.4), so no child can ever occupy the label:
+    //   origin → {x + 2, y + (minLabelH + 1)},  size → {w − 4, h − (minLabelH + 2)}
+    let inner = if out[at].headed {
+        Rect {
+            x: rect.x + 2.0,
+            y: rect.y + (HEADER_PX + 1.0),
+            w: rect.w - 4.0,
+            h: rect.h - (HEADER_PX + 2.0),
+        }
+    } else {
+        rect
+    };
+    // WizTree's guard: nothing under 1px on a side is subdivided. max_depth
+    // is our web addition (bounds the payload).
+    if child_depth > options.max_depth || inner.w < MIN_SIDE || inner.h < MIN_SIDE {
         return; // stays unexpanded: painted solid by the frontend
     }
-    out[at].headed = headed;
-    out[at].expanded = true;
-    descend(index, vol, id, inner, child_depth, branch, options, out);
-}
-
-/// Where a directory's children go: inside the folder padding, below the
-/// name strip when the rect can afford one.
-fn child_area(rect: Rect, options: &TreemapOptions) -> (Rect, bool) {
-    let inner = rect.inset(f64::from(options.dir_padding_px).max(1.0));
-    let header = f64::from(options.dir_header_px);
-    if header > 0.0 && inner.h >= header + 10.0 && inner.w >= 32.0 {
-        (
-            Rect {
-                x: inner.x,
-                y: inner.y + header,
-                w: inner.w,
-                h: inner.h - header,
-            },
-            true,
-        )
-    } else {
-        (inner, false)
+    if descend(index, vol, id, inner, child_depth, branch, options, out) {
+        out[at].expanded = true;
     }
 }
 
@@ -269,10 +322,11 @@ enum Tile {
     },
 }
 
-/// Lay out `dir`'s children into `rect`, tiling it **completely**: children
-/// below [`TreemapOptions::min_area`] (or past
-/// [`TreemapOptions::max_children`]) fold into one aggregate rectangle
-/// instead of being dropped, so a WizTree-style map never shows blank space.
+/// Lay out `dir`'s children into `rect` — the directory's **entire**
+/// rectangle, WizTree-style — tiling it completely: children below
+/// [`TreemapOptions::min_area`] (or past [`TreemapOptions::max_children`])
+/// fold into one aggregate rectangle instead of being dropped, so the map
+/// never shows blank space. Returns false when there was nothing to place.
 #[allow(
     clippy::too_many_arguments,
     reason = "internal recursion; bundling these into a context struct would only rename the arguments"
@@ -286,7 +340,7 @@ fn descend(
     inherited_branch: Option<u16>,
     options: &TreemapOptions,
     out: &mut Vec<TreemapRect>,
-) {
+) -> bool {
     // Children with real footprint, largest first — squarify requires
     // descending weights. Hard-link aliases (allocated 0) drop out here,
     // which is exactly the one-owner accounting the geometry needs.
@@ -305,7 +359,7 @@ fn descend(
         .filter(|&(_, weight)| weight > 0.0)
         .collect();
     if children.is_empty() {
-        return;
+        return false;
     }
     children.sort_by(|a, b| b.1.total_cmp(&a.1));
 
@@ -350,19 +404,22 @@ fn descend(
         tiles.sort_by(|a, b| b.1.total_cmp(&a.1));
     }
 
-    squarify(&tiles, rect, |(tile, _), child_rect| {
+    squarify(&tiles, rect, |(tile, _), cell| {
+        // WizTree rounds each child rect to integer pixel edges *before*
+        // recursing; everything below tiles the rounded rect.
+        let cell = cell.rounded();
         // Depth-1 children of the drill root define the folder-color groups;
         // everything deeper inherits.
         let branch = inherited_branch.unwrap_or(out.len() as u16);
         match tile {
             Tile::Node(child) => {
-                let at = emit(out, vol, index, *child, child_rect, depth, branch);
+                let at = emit(out, vol, index, *child, cell, depth, branch);
                 maybe_descend(
                     index,
                     vol,
                     *child,
                     at,
-                    child_rect,
+                    cell,
                     depth + 1,
                     Some(branch),
                     options,
@@ -376,16 +433,16 @@ fn descend(
             } => out.push(TreemapRect {
                 vol,
                 id: AGGREGATE_ID,
-                x: child_rect.x as f32,
-                y: child_rect.y as f32,
-                w: child_rect.w as f32,
-                h: child_rect.h as f32,
+                x: cell.x as f32,
+                y: cell.y as f32,
+                w: cell.w as f32,
+                h: cell.h as f32,
                 depth,
                 is_dir: false,
                 synthetic: false,
                 category: 0,
                 branch,
-                headed: false,
+                headed: cell.h > LABEL_MIN_H && cell.w > LABEL_MIN_W,
                 expanded: false,
                 aggregate: true,
                 name: format!("{count} smaller items ({})", human_size(*allocated)),
@@ -394,9 +451,11 @@ fn descend(
             }),
         }
     });
+    true
 }
 
-/// Push one rectangle; returns its position so the caller can mark `headed`.
+/// Push one rectangle; returns its position so the caller can mark
+/// `expanded`.
 fn emit(
     out: &mut Vec<TreemapRect>,
     vol: u16,
@@ -425,7 +484,12 @@ fn emit(
         synthetic: node.is_synthetic(),
         category: kind.category_slot(),
         branch,
-        headed: false,
+        // §5.4 folders use `>=` on the width; §5.3 leaves are strict on both.
+        headed: if node.is_directory() {
+            rect.h > LABEL_MIN_H && rect.w >= LABEL_MIN_W
+        } else {
+            rect.h > LABEL_MIN_H && rect.w > LABEL_MIN_W
+        },
         expanded: false,
         aggregate: false,
         size: if node.is_directory() {
@@ -443,96 +507,144 @@ fn emit(
     out.len() - 1
 }
 
-/// The squarified treemap algorithm (Bruls, Huizing, van Wijk).
-///
-/// Items must be sorted by descending weight. Each item's rectangle is
-/// handed to `place`; areas are proportional to weights and exactly tile
-/// `rect` (up to floating-point rounding).
-fn squarify<T>(items: &[(T, f64)], rect: Rect, mut place: impl FnMut(&(T, f64), Rect)) {
-    let total: f64 = items.iter().map(|(_, w)| w).sum();
-    if total <= 0.0 || rect.area() <= 0.0 {
-        return;
-    }
-    let scale = rect.area() / total;
+/// Degenerate-size epsilon in the aspect-ratio comparison (§6.3): ratios of
+/// near-zero extents are zeroed so they can't blow up the row comparison.
+const RATIO_EPSILON: f64 = 1e-5;
 
+/// Floor for the strip advance and the leftover cutoff (§6.5).
+const STRIP_FLOOR: f64 = 0.25;
+
+/// §6.1 overflow guards: at most 1000 subdivision strips, and siblings past
+/// index 49999 get a zero rect (invisible). The recursion enters at depth 1
+/// (§5.4 passes `param2 = 1`).
+const STRIP_DEPTH_CAP: usize = 1000;
+const SIBLING_CAP: usize = 49_999;
+
+/// The squarified treemap partition, following the decompiled
+/// `SquarifyLayout` (§6) — the classic Bruls/Huizing/van Wijk algorithm.
+/// WizTree forces the tree into size-descending order before rendering
+/// (§3.5); callers here must pass items sorted by descending weight.
+///
+/// Each strip recomputes the remaining total and works from the leftover
+/// rectangle's own dimensions; the leftover origin advances by
+/// `max(thickness, 0.25px)` while the extent shrinks by the true thickness;
+/// once the leftover's short side is ≤ 0.25px every remaining item is handed
+/// the leftover rect wholesale; and past the §6.1 depth/sibling caps items
+/// get a zeroed rect and vanish — all per the decompilation.
+fn squarify<T>(items: &[(T, f64)], rect: Rect, mut place: impl FnMut(&(T, f64), Rect)) {
     let mut remaining = rect;
     let mut i = 0;
+    let mut depth = 1usize;
 
     while i < items.len() {
-        // Grow the row while doing so improves the worst aspect ratio.
-        let side = remaining.shorter();
-        let mut row_end = i + 1;
-        let mut row_area = items[i].1 * scale;
-        let mut best = worst_ratio(&items[i..row_end], scale, row_area, side);
+        // §6.1: overflow ⇒ every remaining item gets a zero rect.
+        if depth >= STRIP_DEPTH_CAP || i > SIBLING_CAP {
+            let zero = Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            };
+            for item in &items[i..] {
+                place(item, zero);
+            }
+            return;
+        }
+        // §6.2: total of the not-yet-placed children.
+        let total: f64 = items[i..].iter().map(|(_, w)| w).sum();
+        if total <= 0.0 {
+            return;
+        }
+        // §6.2: split along the rect's shorter side. `w < h` → a horizontal
+        // row across the full width, anchored at the top; otherwise a
+        // vertical column down the full height, at the left.
+        let row = remaining.w < remaining.h;
+        let perp = if row { remaining.h } else { remaining.w };
+        let span = if row { remaining.w } else { remaining.h };
 
-        while row_end < items.len() {
-            let next_area = row_area + items[row_end].1 * scale;
-            let next = worst_ratio(&items[i..=row_end], scale, next_area, side);
-            if next > best {
+        // §6.3: grow the row greedily while the worst aspect ratio improves;
+        // close it right before the item that makes it worse.
+        let mut prev_worst: Option<f64> = None;
+        let mut count = 0;
+        while i + count < items.len() {
+            let candidate = &items[i..=i + count];
+            let row_sum: f64 = candidate.iter().map(|(_, w)| w).sum();
+            let thickness = (row_sum / total) * perp;
+            let mut worst = 1.0f64; // 1.0 = a perfect square
+            for (_, weight) in candidate {
+                let extent = if row_sum > 0.0 {
+                    weight * (span / row_sum)
+                } else {
+                    0.0
+                };
+                let mut ratio = if extent <= thickness || thickness <= RATIO_EPSILON {
+                    if extent <= RATIO_EPSILON {
+                        0.0
+                    } else {
+                        thickness / extent
+                    }
+                } else {
+                    extent / thickness
+                };
+                if !ratio.is_finite() {
+                    ratio = 0.0; // §6.3: ±INF aspect collapses to 0
+                }
+                worst = worst.max(ratio);
+            }
+            if prev_worst.is_some_and(|prev| worst > prev) {
                 break;
             }
-            row_end += 1;
-            row_area = next_area;
-            best = next;
+            prev_worst = Some(worst);
+            count += 1;
         }
 
-        // Lay the row along the shorter side of what remains.
-        let horizontal = remaining.w >= remaining.h;
-        let thickness = if side > 0.0 { row_area / side } else { 0.0 };
-        let mut along = if horizontal { remaining.y } else { remaining.x };
-
-        for item in &items[i..row_end] {
-            let length = if thickness > 0.0 {
-                item.1 * scale / thickness
-            } else {
-                0.0
-            };
-            let cell = if horizontal {
+        // §6.4: lay the finalized row/column.
+        let placed = &items[i..i + count];
+        let row_sum: f64 = placed.iter().map(|(_, w)| w).sum();
+        let thickness = (row_sum / total) * perp;
+        let k = if row_sum > 0.0 { span / row_sum } else { 0.0 };
+        let mut pos = if row { remaining.x } else { remaining.y };
+        for item in placed {
+            let extent = item.1 * k;
+            let cell = if row {
                 Rect {
-                    x: remaining.x,
-                    y: along,
-                    w: thickness,
-                    h: length,
+                    x: pos,
+                    y: remaining.y,
+                    w: extent,
+                    h: thickness,
                 }
             } else {
                 Rect {
-                    x: along,
-                    y: remaining.y,
-                    w: length,
-                    h: thickness,
+                    x: remaining.x,
+                    y: pos,
+                    w: thickness,
+                    h: extent,
                 }
             };
             place(item, cell);
-            along += length;
+            pos += extent;
         }
+        i += count;
+        depth += 1;
 
-        if horizontal {
-            remaining.x += thickness;
-            remaining.w -= thickness;
-        } else {
-            remaining.y += thickness;
+        // §6.5: advance into the leftover. The origin moves by the floored
+        // thickness while the extent shrinks by the true one.
+        let advance = thickness.max(STRIP_FLOOR);
+        if row {
+            remaining.y += advance;
             remaining.h -= thickness;
+        } else {
+            remaining.x += advance;
+            remaining.w -= thickness;
         }
-        i = row_end;
-    }
-}
-
-/// The worst (largest) aspect ratio a row would have at this thickness.
-fn worst_ratio<T>(row: &[(T, f64)], scale: f64, row_area: f64, side: f64) -> f64 {
-    if row_area <= 0.0 || side <= 0.0 {
-        return f64::MAX;
-    }
-    let thickness = row_area / side;
-    let mut worst = 1.0f64;
-    for (_, weight) in row {
-        let length = weight * scale / thickness;
-        if length <= 0.0 {
-            return f64::MAX;
+        if i < items.len() && remaining.shorter() <= STRIP_FLOOR {
+            // Degenerate leftover: every remaining child gets the whole of it.
+            for item in &items[i..] {
+                place(item, remaining);
+            }
+            return;
         }
-        let ratio = (thickness / length).max(length / thickness);
-        worst = worst.max(ratio);
     }
-    worst
 }
 
 #[cfg(test)]
@@ -599,9 +711,9 @@ mod tests {
         let big = rects.iter().find(|r| r.name == "big.iso").unwrap();
         let docs = rects.iter().find(|r| r.name == "docs").unwrap();
 
-        // big.iso is 1200 of 2000 total → 60% of the canvas (children tile
-        // the root's inner area, which loses the 1px padding and the 14px
-        // name strip — a few percent on a 500px canvas).
+        // big.iso is 1200 of 2000 total → 60% of the canvas. The labelled
+        // root carves its header strip and side margins off the child area
+        // (§5.4), which costs a few percent on a 500px canvas.
         let canvas_area = 1000.0 * 500.0;
         let big_share = (big.w * big.h) / canvas_area;
         assert!(
@@ -628,6 +740,20 @@ mod tests {
         assert!(a.y + a.h <= docs.y + docs.h + 0.01);
         assert_eq!(a.depth, docs.depth + 1);
         assert_eq!(a.branch, docs.branch, "children inherit the folder color");
+    }
+
+    #[test]
+    fn rects_snap_to_integer_pixel_edges() {
+        let index = index();
+        let rects = layout(&[&index], None, &options());
+        // WizTree rounds every child rect before recursing; everything below
+        // the root columns is integer-aligned.
+        for r in &rects {
+            assert_eq!(r.x, r.x.round(), "{} x={} not integer", r.name, r.x);
+            assert_eq!(r.y, r.y.round(), "{} y={} not integer", r.name, r.y);
+            assert_eq!(r.w, r.w.round(), "{} w={} not integer", r.name, r.w);
+            assert_eq!(r.h, r.h.round(), "{} h={} not integer", r.name, r.h);
+        }
     }
 
     #[test]
@@ -702,14 +828,14 @@ mod tests {
         let rects = layout(&[&index], None, &options());
         let free_rect = rects.iter().find(|r| r.name == "Free space").unwrap();
         assert!(free_rect.synthetic);
-        // 3000 of 4000 bytes → 75% of the canvas (less the root's padding
-        // and name strip).
+        // 3000 of 4000 bytes → 75% of the canvas (less the root's header
+        // strip and margins).
         let share = (free_rect.w * free_rect.h) / (1000.0 * 500.0);
         assert!((share - 0.75).abs() < 0.04, "free space covers {share:.3}");
     }
 
     #[test]
-    fn multiple_volumes_share_one_canvas_by_size() {
+    fn volumes_slice_into_full_height_columns() {
         let build = |label: &str, bytes: u64| {
             let caps = crate::service::scan::ntfs_caps(label.to_string());
             let mut b = IndexBuilder::new(caps, CancellationToken::new());
@@ -723,8 +849,26 @@ mod tests {
         let c_root = rects.iter().find(|r| r.name == "C:").unwrap();
         let d_root = rects.iter().find(|r| r.name == "D:").unwrap();
 
-        let ratio = (c_root.w * c_root.h) / (d_root.w * d_root.h);
-        assert!((ratio - 3.0).abs() < 0.1, "C: is 3× D:, got {ratio:.2}");
+        // WizTree's root strips (§3.8): full-height vertical columns, each
+        // width rounded independently from its own share, 1px gap between
+        // neighbors (the last strip may overshoot the frame; the canvas
+        // clips it).
+        assert!((c_root.h - 500.0).abs() < 0.01, "C: column is full height");
+        assert!((d_root.h - 500.0).abs() < 0.01, "D: column is full height");
+        assert!(
+            (c_root.w - 750.0).abs() < 0.01,
+            "C: holds 75% of the bytes → round(1000·0.75) = 750px, got {}",
+            c_root.w
+        );
+        assert!(
+            (d_root.w - 250.0).abs() < 0.01,
+            "D: gets round(1000·0.25) = 250px, got {}",
+            d_root.w
+        );
+        assert!(
+            (d_root.x - (c_root.x + c_root.w + 1.0)).abs() < 0.01,
+            "columns are separated by the 1px gap"
+        );
         assert_ne!(c_root.branch, d_root.branch, "volumes get distinct colors");
     }
 
@@ -760,42 +904,56 @@ mod tests {
     }
 
     #[test]
-    fn directories_reserve_a_name_strip_when_tall_enough() {
+    fn labelled_folders_carve_a_header_strip_before_partitioning() {
         let index = index();
         let rects = layout(&[&index], None, &options());
 
         let docs = rects.iter().find(|r| r.name == "docs").unwrap();
-        assert!(docs.headed, "a large directory gets its name strip");
-        // Children start below the strip: 1px padding + 14px header.
-        let a = rects.iter().find(|r| r.name == "a.pdf").unwrap();
-        assert!(
-            a.y >= docs.y + 14.0,
-            "a.pdf starts at {} inside docs at {} — below the header",
-            a.y,
-            docs.y
-        );
-        assert!(!a.headed, "files never reserve a strip");
+        assert!(docs.expanded && docs.headed);
 
-        // With headers disabled, children tile right at the padding.
-        let no_header = layout(
-            &[&index],
-            None,
-            &TreemapOptions {
-                dir_header_px: 0.0,
-                ..options()
-            },
+        // §5.4: the child area shrinks to {x+2, y+(minLabelH+1), w−4,
+        // h−(minLabelH+2)} BEFORE squarify, so no child can occupy the strip.
+        let children: Vec<_> = rects
+            .iter()
+            .filter(|r| r.depth == docs.depth + 1)
+            .collect();
+        let top = children.iter().map(|r| r.y).fold(f32::MAX, f32::min);
+        let left = children.iter().map(|r| r.x).fold(f32::MAX, f32::min);
+        assert!(
+            (top - (docs.y + 15.0)).abs() < 0.01,
+            "children start below the header strip (labelH + 1)"
         );
-        let docs = no_header.iter().find(|r| r.name == "docs").unwrap();
-        let a = no_header.iter().find(|r| r.name == "a.pdf").unwrap();
-        assert!(!docs.headed);
-        assert!(a.y <= docs.y + 2.5, "just the folder padding, no strip");
+        assert!(
+            (left - (docs.x + 2.0)).abs() < 0.01,
+            "children start inside the 2px side margin"
+        );
+        let child_area: f64 = children
+            .iter()
+            .map(|r| f64::from(r.w) * f64::from(r.h))
+            .sum();
+        let inner_area = f64::from(docs.w - 4.0) * f64::from(docs.h - 16.0);
+        assert!(
+            (child_area - inner_area).abs() < 2.0,
+            "children cover {child_area:.1} of the carved {inner_area:.1} px²"
+        );
+
+        // Leaves are labelled too when they clear BOTH thresholds (§5.3) —
+        // but the label overdraws the block; it never affects layout.
+        let big = rects.iter().find(|r| r.name == "big.iso").unwrap();
+        assert!(big.headed && !big.expanded);
+        // b.pdf is 200 of 2000 bytes → far under the 80px width gate.
+        let b = rects.iter().find(|r| r.name == "b.pdf").unwrap();
+        assert!(
+            b.headed == (b.h > 12.0 && b.w > 80.0),
+            "leaf labels need BOTH h > 12 and w > 80"
+        );
     }
 
     #[test]
     fn small_children_aggregate_instead_of_leaving_blank_space() {
         // One big file and 200 tiny ones: the tiny tail folds into a single
-        // aggregate rect, and together the children tile the whole inner
-        // area — the WizTree no-blank-space property.
+        // aggregate rect, and together the children tile the whole root
+        // column — the WizTree no-blank-space property.
         let caps = crate::service::scan::ntfs_caps("C:".to_string());
         let mut b = IndexBuilder::new(caps, CancellationToken::new());
         let _ = b.push_batch(&[dir(5, 5, ""), file(10, 5, "big.bin", 1_000_000)]);
@@ -816,11 +974,10 @@ mod tests {
         assert!(aggregate.name.contains("200 smaller items"));
 
         // Full coverage: the root's children (big + aggregate) fill its
-        // inner area exactly (inner = canvas minus the 2px folder padding
-        // and the 14px header strip).
+        // carved child area (the rect minus the §5.4 header strip + margins).
         let root = rects.iter().find(|r| r.depth == 0).unwrap();
         assert!(root.expanded && root.headed);
-        let inner_area = f64::from(root.w - 4.0) * f64::from(root.h - 4.0 - 14.0);
+        let inner_area = f64::from(root.w - 4.0) * f64::from(root.h - 16.0);
         let child_area: f64 = rects
             .iter()
             .filter(|r| r.depth == 1)
@@ -846,11 +1003,10 @@ mod tests {
         );
         let docs = rects.iter().find(|r| r.name == "docs").unwrap();
         assert!(!docs.expanded, "past max depth: paints as a solid block");
-        assert!(!docs.headed, "no name strip without children below it");
 
         let full = layout(&[&index], None, &options());
         let docs = full.iter().find(|r| r.name == "docs").unwrap();
-        assert!(docs.expanded && docs.headed);
+        assert!(docs.expanded);
     }
 
     #[test]

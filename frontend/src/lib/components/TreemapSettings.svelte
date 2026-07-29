@@ -1,12 +1,16 @@
 <!--
-  TreemapSettings.svelte — edit the treemap coloring: mode (size buckets vs
-  extension categories) and the size buckets themselves, both persisted to
-  the global config in appdata (core `service::config`, TOML).
+  TreemapSettings.svelte — edit the treemap coloring mode, persisted to the
+  global config in appdata (core `service::config`, TOML).
+
+  Two modes (WizTree parity): "ranked" assigns the 13-color WizTree palette
+  to extensions by total size-on-disk rank (everything past the list gets
+  the last, gray entry); "extension" colors by extension with a configurable
+  extension→color list — the editable list is a FUTURE milestone, so today
+  it falls back to the built-in category palette.
 -->
 <script lang="ts">
   import { getConfig, setConfig } from "../ipc";
   import { session, queryChanged } from "../session.svelte";
-  import type { SizeRange } from "../types";
 
   interface Props {
     open: boolean;
@@ -14,79 +18,23 @@
   }
   let { open, onClose }: Props = $props();
 
-  interface EditRange {
-    maxText: string;
-    color: string;
-  }
-
-  let mode = $state<"size" | "extension">("size");
-  let ranges = $state<EditRange[]>([]);
-  let error = $state("");
+  let mode = $state<"ranked" | "extension">("ranked");
 
   // Re-seed the editor from the live session every time it opens.
   $effect(() => {
     if (open) {
       mode = session.colorMode;
-      ranges = session.sizeRanges.map((r) => ({
-        maxText: humanBytes(r.max_bytes),
-        color: r.color,
-      }));
-      error = "";
     }
   });
 
-  function humanBytes(bytes: number): string {
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    let v = bytes;
-    let u = 0;
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024;
-      u += 1;
-    }
-    const text = Number.isInteger(v) ? `${v}` : v.toFixed(1);
-    return `${text} ${units[u]}`;
-  }
-
-  function parseBytes(text: string): number | null {
-    const m = /^\s*([\d.]+)\s*(b|kb|kib|mb|mib|gb|gib|tb|tib)?\s*$/i.exec(text);
-    if (!m) return null;
-    const value = Number.parseFloat(m[1]);
-    if (!Number.isFinite(value) || value < 0) return null;
-    const unit = (m[2] ?? "b").toLowerCase();
-    const power = { b: 0, kb: 1, kib: 1, mb: 2, mib: 2, gb: 3, gib: 3, tb: 4, tib: 4 }[unit] ?? 0;
-    return Math.round(value * 1024 ** power);
-  }
-
-  function addRange() {
-    ranges.push({ maxText: "1 GB", color: "#888888" });
-  }
-
-  function removeRange(i: number) {
-    ranges.splice(i, 1);
-  }
-
   async function save() {
-    const parsed: SizeRange[] = [];
-    for (const r of ranges) {
-      const max = parseBytes(r.maxText);
-      if (max === null) {
-        error = `"${r.maxText}" is not a size — use forms like 500 KB, 16 MB, 1.5 GB`;
-        return;
-      }
-      parsed.push({ max_bytes: max, color: r.color });
-    }
-    if (mode === "size" && parsed.length === 0) {
-      error = "Size mode needs at least one bucket.";
-      return;
-    }
-    parsed.sort((a, b) => a.max_bytes - b.max_bytes);
-
     const config = await getConfig();
-    config.treemap = { color_mode: mode, size_ranges: parsed };
+    // size_ranges passes through untouched: legacy data from the retired
+    // size-bucket mode, kept so old configs round-trip.
+    config.treemap = { color_mode: mode, size_ranges: session.sizeRanges };
     await setConfig(config);
 
     session.colorMode = mode;
-    session.sizeRanges = parsed;
     queryChanged(true); // repaints the view epoch downstream
     onClose();
   }
@@ -115,42 +63,23 @@
       <label class="mode">
         Color files by
         <select bind:value={mode}>
-          <option value="size">Size (WizTree-style buckets)</option>
+          <option value="ranked">Extension, ranked by size (WizTree)</option>
           <option value="extension">Extension category</option>
         </select>
       </label>
 
-      {#if mode === "size"}
-        <div class="ranges">
-          <div class="ranges-head">
-            <span>Up to</span>
-            <span>Color</span>
-            <span></span>
-          </div>
-          {#each ranges as range, i (i)}
-            <div class="range">
-              <input class="max" bind:value={range.maxText} spellcheck="false" />
-              <input class="color" type="color" bind:value={range.color} />
-              <button
-                class="remove"
-                title="Remove bucket"
-                disabled={ranges.length <= 1}
-                onclick={() => removeRange(i)}
-              >
-                ×
-              </button>
-            </div>
-          {/each}
-          <button class="add" onclick={addRange}>+ Add bucket</button>
-          <p class="hint">
-            Buckets sort by size on save; anything larger than the last bucket
-            takes its color.
-          </p>
-        </div>
-      {/if}
-
-      {#if error}
-        <p class="error">{error}</p>
+      {#if mode === "ranked"}
+        <p class="hint">
+          The extensions using the most space on disk each get their own
+          color from the WizTree palette, in order; every other extension is
+          gray.
+        </p>
+      {:else}
+        <p class="hint">
+          Colors by built-in category (executables, archives, images, …).
+          Assigning specific colors to specific extensions will be
+          configurable here in a later milestone.
+        </p>
       {/if}
 
       <footer>
@@ -223,78 +152,10 @@
     font-size: var(--font-size-body);
   }
 
-  .ranges {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  .ranges-head,
-  .range {
-    display: grid;
-    grid-template-columns: 1fr 56px 28px;
-    align-items: center;
-    gap: var(--space-2);
-  }
-  .ranges-head {
-    color: var(--text-muted);
-    font-size: var(--font-size-caption);
-  }
-  .range .max {
-    height: 28px;
-    padding: 0 var(--space-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-small);
-    background: var(--surface);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: var(--font-size-body);
-  }
-  .range .color {
-    width: 56px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-small);
-    background: none;
-    cursor: pointer;
-  }
-  .range .remove {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-small);
-    background: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-  }
-  .range .remove:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .add {
-    align-self: flex-start;
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-small);
-    background: none;
-    padding: var(--space-1) var(--space-2);
-    color: var(--text-secondary);
-    font-family: inherit;
-    font-size: var(--font-size-body);
-    cursor: pointer;
-  }
-
   .hint {
     margin: 0;
     color: var(--text-muted);
     font-size: var(--font-size-caption);
-  }
-  .error {
-    margin: 0;
-    color: var(--danger);
-    font-size: var(--font-size-body);
   }
 
   footer {

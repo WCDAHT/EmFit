@@ -77,16 +77,29 @@ impl Default for Config {
     }
 }
 
-/// How the treemap colors its rectangles. Both the mode and the size buckets
-/// are user-editable and persist here, per the UI direction of 2026-07-26.
+/// How the treemap colors its rectangles.
+///
+/// Two modes (UI direction of 2026-07-29):
+/// - `"ranked"` — WizTree's scheme: extensions are ranked by total
+///   allocated bytes and assigned the 13-color WizTree palette in rank
+///   order; any extension past the list takes the last (gray) color. The
+///   palette currently lives in the frontend (`Treemap.svelte`).
+/// - `"extension"` — colors by extension with a configurable
+///   extension→color list. **Not in the current milestone:** today it falls
+///   back to the built-in category palette (`--category-N`); the editable
+///   per-extension list (and the ranked palette itself) should eventually
+///   persist here next to `size_ranges`.
+///
+/// `"size"` (legacy bucket mode) is retired; old configs carrying it are
+/// mapped to `"ranked"` on load by the frontend. `size_ranges` stays
+/// persisted for that legacy data but nothing reads it anymore.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TreemapConfig {
-    /// `"size"` (WizTree-style buckets by file size) or `"extension"`
-    /// (the category palette).
+    /// `"ranked"` (WizTree size-ranked palette) or `"extension"`.
     pub color_mode: String,
-    /// Ascending buckets: a file takes the color of the first range whose
-    /// `max_bytes` covers it; anything larger takes the last range's color.
+    /// Legacy size-bucket data (retired mode); kept so old configs
+    /// round-trip losslessly.
     pub size_ranges: Vec<SizeRange>,
 }
 
@@ -102,7 +115,7 @@ pub struct SizeRange {
 impl Default for TreemapConfig {
     fn default() -> Self {
         Self {
-            color_mode: "size".to_string(),
+            color_mode: "ranked".to_string(),
             size_ranges: vec![
                 SizeRange {
                     max_bytes: 1 << 20, // ≤ 1 MiB

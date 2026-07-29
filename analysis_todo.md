@@ -67,13 +67,24 @@ goes stale.
 
 - Scan chips show a real progress bar (native `<progress>`): indeterminate
   until the `$MFT` bitmap yields the expected count, determinate after.
-- Treemap paints WizTree's grammar: files = unlabeled 1px-bordered boxes
-  packed edge to edge; folders = 1px padding + a reserved name strip
-  (`name\ (999 GiB)`). The strip height is 14px and lives in the *Rust*
-  layout (`TreemapOptions::dir_header_px`); the frontend constant
-  `HEADER_PX` in Treemap.svelte must match it.
-- Colors: size buckets (default) or extension categories; mode + buckets
-  persist in `config.toml` (`[treemap]`), edited via the Colors… dialog.
+- Treemap paints WizTree's recovered grammar (logs/wiztree_treemap_algorithm.md):
+  files = solid boxes with a darkened right/bottom edge bevel, captioned
+  `name (size)` over the fill when h > 12px AND w > 80px; labelled folders
+  (h > 12, w ≥ 80) = a reserved 14px header strip (`name\ (999 GiB)`) carved
+  off the top *before* squarify, framed by the two-tone 3D frame (0x303030
+  left+bottom, 0x404040 right+top). The strip height lives in the *Rust*
+  layout (`HEADER_PX` const in treemap.rs); the frontend constant `HEADER_PX`
+  in Treemap.svelte must match it.
+- Colors, two modes persisted in `config.toml` (`[treemap]`, Colors… dialog):
+  `ranked` (default, WizTree parity) ranks extensions by total allocated
+  bytes and assigns the 13-color WizTree palette (FF8514, FFFF07, 30FF45,
+  A53FFF, FF4992, 15A3FF, 7F77FF, FF2DED, FF110F, 81AD2E, 15E4B6, BC7829,
+  696969) in rank order — unranked extensions and solid folders get the last
+  (gray) entry; `extension` colors by extension via the built-in category
+  palette for now — TODO(future milestone): user-configurable
+  extension→color list (and palette) in settings, persisted in
+  `TreemapConfig`. Legacy `size` bucket mode is retired (old configs map to
+  `ranked`; `size_ranges` kept only for round-tripping).
 - Tree-list double-click must NOT re-root the treemap; drilling happens
   only from the map (double-click / breadcrumb).
 - Treemap height set by a splitter that applies on drag **release** only.

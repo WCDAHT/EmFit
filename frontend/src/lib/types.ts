@@ -12,7 +12,7 @@ export interface AppConfig {
 
 /** Mirror of `TreemapConfig`: how the treemap colors rectangles. */
 export interface TreemapConfig {
-  color_mode: string; // "size" | "extension"
+  color_mode: string; // "ranked" | "extension" ("size" is legacy → ranked)
   size_ranges: SizeRange[];
 }
 

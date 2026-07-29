@@ -81,8 +81,8 @@
       bind:value={session.colorMode}
       onchange={() => (session.viewEpoch = session.viewEpoch)}
     >
-      <option value="size">Size</option>
-      <option value="extension">Extension</option>
+      <option value="ranked">Extension (ranked)</option>
+      <option value="extension">Category</option>
     </select>
   </label>
   <button class="quick" onclick={() => (colorsOpen = true)}>Colors…</button>
