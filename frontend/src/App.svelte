@@ -12,6 +12,7 @@
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import About from "./lib/components/About.svelte";
+  import Settings from "./lib/components/Settings.svelte";
   import ShortcutsDialog from "./lib/components/ShortcutsDialog.svelte";
   import ScanControls from "./lib/views/ScanControls.svelte";
   import ScanStatus from "./lib/views/ScanStatus.svelte";
@@ -29,8 +30,10 @@
     selectAll,
   } from "./lib/session.svelte";
   import type { ScanDoneEvent, ScanProgressEvent, ViewUpdatedEvent } from "./lib/types";
+  import { SIZE_UNITS, formatSize, type SizeUnit } from "./lib/format";
 
   let aboutOpen = $state(false);
+  let settingsOpen = $state(false);
   let shortcutsOpen = $state(false);
 
   onMount(() => {
@@ -56,7 +59,7 @@
               message: "",
               done: 0,
               total: null,
-              summary: `${payload.files.toLocaleString()} files, ${payload.total_display} in ${(payload.elapsed_ms / 1000).toFixed(1)}s`,
+              summary: `${payload.files.toLocaleString()} files, ${formatSize(payload.total_size)} in ${(payload.elapsed_ms / 1000).toFixed(1)}s`,
             }
           : {
               phase: "error",
@@ -76,7 +79,7 @@
         session.total = payload.total;
         session.elapsedMs = payload.elapsed_ms;
         session.warnings = payload.warnings;
-        session.volumesTotalDisplay = payload.volumes_total_display;
+        session.volumesTotalBytes = payload.volumes_total_bytes;
         session.viewEpoch += 1;
         // The result set changed under the selection; positions are stale.
         clearSelection();
@@ -97,6 +100,9 @@
           case "toggle_theme":
             toggleThemeMode();
             break;
+          case "settings":
+            settingsOpen = true;
+            break;
           case "shortcuts":
             shortcutsOpen = true;
             break;
@@ -111,6 +117,9 @@
     // project the persisted treemap coloring into the session.
     void syncThemeWithConfig();
     void getConfig().then((cfg) => {
+      session.sizeUnit = (SIZE_UNITS as readonly string[]).includes(cfg.size_unit)
+        ? (cfg.size_unit as SizeUnit)
+        : "dynamic";
       if (cfg.treemap) {
         session.colorMode = cfg.treemap.color_mode === "extension" ? "extension" : "ranked";
         session.showFreeSpace = cfg.treemap.show_free_space ?? false;
@@ -130,7 +139,7 @@
   // All app shortcuts, dispatched at the root (STANDARDS §3.7). Open dialogs
   // own their own Esc; global handling is suppressed while one is up.
   function onKeydown(e: KeyboardEvent) {
-    const dialogOpen = aboutOpen || shortcutsOpen;
+    const dialogOpen = aboutOpen || shortcutsOpen || settingsOpen;
 
     if (e.key === "F1") {
       e.preventDefault();
@@ -207,6 +216,7 @@
 </main>
 
 <About open={aboutOpen} onClose={() => (aboutOpen = false)} />
+<Settings open={settingsOpen} onClose={() => (settingsOpen = false)} />
 <ShortcutsDialog open={shortcutsOpen} onClose={() => (shortcutsOpen = false)} />
 
 <style>

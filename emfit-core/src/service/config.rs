@@ -62,7 +62,14 @@ pub struct Config {
     /// The worked example of a persisted setting â€” replace/extend per app.
     pub theme: Option<String>,
 
-    /// Treemap coloring, edited from the Tree view's settings dialog.
+    /// How byte counts render everywhere in the UI: `"dynamic"` (largest
+    /// unit whose value is ≥ 1) or one fixed unit — `"B"`, `"KB"`, `"MB"`,
+    /// `"GB"`, `"TB"`, `"bit"`, `"Kbit"`, `"Mbit"`, `"Gbit"`, `"Tbit"`.
+    /// The single formatter honoring it lives in the frontend
+    /// (`lib/format.ts`).
+    pub size_unit: String,
+
+    /// Treemap coloring, edited from the settings dialog.
     pub treemap: TreemapConfig,
     // --- add further settings here (window geometry, recent files, â€¦) ---
 }
@@ -72,6 +79,7 @@ impl Default for Config {
         Self {
             schema_version: SCHEMA_VERSION,
             theme: None,
+            size_unit: "dynamic".to_string(),
             treemap: TreemapConfig::default(),
         }
     }

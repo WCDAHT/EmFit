@@ -75,7 +75,8 @@ goes stale.
   left+bottom, 0x404040 right+top). The strip height lives in the *Rust*
   layout (`HEADER_PX` const in treemap.rs); the frontend constant `HEADER_PX`
   in Treemap.svelte must match it.
-- Colors, two modes persisted in `config.toml` (`[treemap]`, Colors… dialog):
+- Colors, two modes persisted in `config.toml` (`[treemap]`, Settings dialog
+  in the native View menu — no on-screen buttons):
   `ranked` (default, WizTree parity) ranks extensions by total allocated
   bytes and assigns the 13-color WizTree palette (FF8514, FFFF07, 30FF45,
   A53FFF, FF4992, 15A3FF, 7F77FF, FF2DED, FF110F, 81AD2E, 15E4B6, BC7829,

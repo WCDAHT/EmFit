@@ -18,6 +18,7 @@
 -->
 <script lang="ts">
   import { getRows } from "../ipc";
+  import { formatSize } from "../format";
   import {
     session,
     isSelected,
@@ -194,8 +195,8 @@
             {#if row.is_synthetic}<span class="badge" title="Not a file on the volume">virtual</span>{/if}
             {#if row.is_reparse}<span class="badge" title="Reparse point / junction — not followed">junction</span>{/if}
           </span>
-          <span class="cell numeric">{row.size_display}</span>
-          <span class="cell numeric">{row.allocated_display}</span>
+          <span class="cell numeric">{formatSize(row.size)}</span>
+          <span class="cell numeric">{formatSize(row.allocated)}</span>
           <span class="cell">{row.extension}</span>
           <span class="cell">{row.modified_display}</span>
           <span class="cell">{row.kind_label}</span>

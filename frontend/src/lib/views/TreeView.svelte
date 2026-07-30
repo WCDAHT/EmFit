@@ -12,10 +12,7 @@
   import FolderTree from "./FolderTree.svelte";
   import Treemap from "./Treemap.svelte";
   import TypesPanel from "./TypesPanel.svelte";
-  import TreemapSettings from "../components/TreemapSettings.svelte";
   import { session, queryChanged, sortBy } from "../session.svelte";
-
-  let colorsOpen = $state(false);
 
   /** The file-types panel is parked until its UX is designed (user call,
    *  2026-07-27). The component and its plumbing stay alive behind this. */
@@ -64,35 +61,10 @@
   onmouseup={dragging ? onDragEnd : undefined}
 />
 
+<!-- Depth, color mode, and units now live in the Settings dialog (native
+     View menu) — the toolbar keeps only view jumps. The treemap-depth and
+     size-mode session state stays alive underneath. -->
 <div class="controls">
-  <label>
-    Depth
-    <select bind:value={session.treemapDepth}>
-      {#each [2, 3, 4, 5, 6, 8] as d (d)}
-        <option value={d}>{d}</option>
-      {/each}
-      <!-- 0 = unlimited; recursion is pixel-bounded, so "Max" is safe. -->
-      <option value={0}>Max</option>
-    </select>
-  </label>
-  <label>
-    Color by
-    <select
-      bind:value={session.colorMode}
-      onchange={() => (session.viewEpoch = session.viewEpoch)}
-    >
-      <option value="ranked">Extension (ranked)</option>
-      <option value="extension">Category</option>
-    </select>
-  </label>
-  <button class="quick" onclick={() => (colorsOpen = true)}>Colors…</button>
-  <label>
-    Show
-    <select bind:value={session.sizeMode}>
-      <option value="allocated">Size on disk</option>
-      <option value="logical">Logical size</option>
-    </select>
-  </label>
   <span class="flex"></span>
   <button class="quick" onclick={() => topN("file")}>Top files</button>
   <button class="quick" onclick={() => topN("folder")}>Top folders</button>
@@ -129,30 +101,11 @@
   <div class="ghost" style:top="{ghostY}px"></div>
 {/if}
 
-<TreemapSettings open={colorsOpen} onClose={() => (colorsOpen = false)} />
-
 <style>
   .controls {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-  }
-  .controls label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--text-secondary);
-    font-size: var(--font-size-body);
-  }
-  .controls select {
-    height: 24px;
-    padding: 0 var(--space-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-small);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: var(--font-size-body);
   }
   .flex {
     flex: 1;

@@ -54,7 +54,8 @@ export const session = $state({
   total: 0,
   elapsedMs: 0,
   warnings: [] as string[],
-  volumesTotalDisplay: "",
+  /** Raw indexed-bytes total from `view:updated`; formatted at display. */
+  volumesTotalBytes: 0,
   /** Bumped whenever the view changes so the list refetches its window. */
   viewEpoch: 0,
 
@@ -80,6 +81,10 @@ export const session = $state({
   /** Draw the synthetic free-space block in the treemap (config-persisted;
    *  off by default). */
   showFreeSpace: false,
+  /** How every byte count renders (config-persisted): "dynamic" picks the
+   *  largest unit ≥ 1; anything else is a fixed unit. Consumed exclusively
+   *  through `formatSize` in lib/format.ts. */
+  sizeUnit: "dynamic" as import("./format").SizeUnit,
   /** Fixed height of the treemap row, set by the splitter on drag release;
    *  null = the default flex split. */
   treemapHeight: null as number | null,

@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
   import { session, selectionCount } from "../session.svelte";
+  import { formatSize } from "../format";
 
   const objects = $derived(session.total.toLocaleString());
   const selected = $derived(selectionCount());
@@ -16,12 +17,12 @@
     <span class="sep">·</span>
     <span>
       {selected.toLocaleString()} selected{#if session.summary}
-        &nbsp;({session.summary.bytes_display}, {session.summary.allocated_display} on disk){/if}
+        &nbsp;({formatSize(session.summary.bytes)}, {formatSize(session.summary.allocated)} on disk){/if}
     </span>
   {/if}
   <span class="spacer"></span>
-  {#if session.volumesTotalDisplay}
-    <span>{session.volumesTotalDisplay} indexed</span>
+  {#if session.volumesTotalBytes > 0}
+    <span>{formatSize(session.volumesTotalBytes)} indexed</span>
   {/if}
 </div>
 

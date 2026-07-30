@@ -21,6 +21,7 @@
 -->
 <script lang="ts">
   import { nodeInfo, nodeLineage, treemapLayout, typeBreakdown } from "../ipc";
+  import { formatSize } from "../format";
   import { session } from "../session.svelte";
   import type { NodeInfoDto, TreemapRectDto, TypeRowDto } from "../types";
   import Icon from "../components/Icon.svelte";
@@ -469,7 +470,7 @@
         ctx.stroke();
         // Header text sits in its own strip on the surface background —
         // clipped to the strip (TextRect semantics), never wrapped.
-        const label = `${r.name}\\ (${r.allocated_display})`;
+        const label = `${r.name}\\ (${formatSize(r.allocated)})`;
         ctx.save();
         ctx.beginPath();
         ctx.rect(r.x + 2, r.y + 1, Math.max(0, r.w - 4), HEADER_PX);
@@ -484,7 +485,7 @@
       // {left+4, bottom−2} (§5.3). All-or-nothing is our web adjustment in
       // place of TextRect clipping: wrap at spaces into as many lines as
       // the box is tall; if even wrapped it cannot fit, no text at all.
-      const label = `${r.is_dir ? `${r.name}\\` : r.name} (${r.allocated_display})`;
+      const label = `${r.is_dir ? `${r.name}\\` : r.name} (${formatSize(r.allocated)})`;
       const lines = wrapToFit(ctx, label, r.w - 8, r.h - 4);
       if (!lines) continue;
       // A halo in the surface color keeps the text readable over any block
@@ -820,7 +821,7 @@
       <div class="tooltip" style:left="{tooltipPos.x}px" style:top="{tooltipPos.y}px">
         <div class="tip-name">{hover.name}</div>
         <div class="tip-detail">
-          {hover.allocated_display} on disk · {hover.size_display}
+          {formatSize(hover.allocated)} on disk · {formatSize(hover.size)}
         </div>
         {#if hoverInfo}
           <div class="tip-path">{hoverInfo.path}</div>

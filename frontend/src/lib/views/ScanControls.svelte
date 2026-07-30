@@ -10,6 +10,7 @@
   import { onMount } from "svelte";
   import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
   import { cancelScan, elevationStatus, listVolumes, startScan } from "../ipc";
+  import { formatSize } from "../format";
   import { session, hooks, addTarget, removeTarget } from "../session.svelte";
   import Icon from "../components/Icon.svelte";
 
@@ -145,7 +146,7 @@
             <span class="label">
               {v.name}
               <span class="detail">
-                {v.label ?? v.filesystem} · {v.free_display} free of {v.total_display}
+                {v.label ?? v.filesystem} · {formatSize(v.free_bytes)} free of {formatSize(v.total_bytes)}
               </span>
             </span>
             <button

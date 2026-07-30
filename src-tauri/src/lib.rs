@@ -62,6 +62,7 @@ pub fn run() {
                 .build()?;
             let view = SubmenuBuilder::new(app, "View")
                 .text("toggle_theme", "Toggle light/dark")
+                .text("settings", "Settings…")
                 .build()?;
             let help = SubmenuBuilder::new(app, "Help")
                 .text("shortcuts", "Keyboard shortcuts\tF1")

@@ -302,7 +302,10 @@ pub struct TreeRowDto {
     pub percent_of_parent: f32,
     pub files: u32,
     pub dirs: u32,
+    pub items: u32,
+    pub modified: i64,
     pub modified_display: String,
+    pub attributes: String,
     pub has_children: bool,
 }
 
@@ -321,7 +324,10 @@ impl From<TreeRow> for TreeRowDto {
             percent_of_parent: r.percent_of_parent,
             files: r.files,
             dirs: r.dirs,
+            items: r.items,
+            modified: r.modified,
             modified_display: r.modified_display,
+            attributes: r.attributes,
             has_children: r.has_children,
         }
     }

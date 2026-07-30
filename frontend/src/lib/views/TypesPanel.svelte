@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { typeBreakdown } from "../ipc";
+  import { formatSize } from "../format";
   import { session, queryChanged } from "../session.svelte";
   import type { TypeRowDto } from "../types";
 
@@ -75,7 +76,7 @@
         <span class="bar">
           <span class="fill" style:width="{Math.min(100, row.percent)}%"></span>
         </span>
-        <span class="alloc">{row.allocated_display}</span>
+        <span class="alloc">{formatSize(row.allocated)}</span>
         <span class="pct">{row.percent.toFixed(1)}%</span>
       </label>
     {/each}

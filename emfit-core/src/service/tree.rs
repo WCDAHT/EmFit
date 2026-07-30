@@ -26,9 +26,37 @@ pub struct TreeRow {
     pub percent_of_parent: f32,
     pub files: u32,
     pub dirs: u32,
+    /// `files + dirs` for a directory (its Items column); 0 for a file.
+    pub items: u32,
+    /// Raw mtime, nanoseconds since the Unix epoch (0 = unknown) — the sort
+    /// key behind `modified_display`.
+    pub modified: i64,
     pub modified_display: String,
+    /// Compact attribute letters, WizTree-style: `H` hidden, `S` system,
+    /// `R` reparse/junction, `C` compressed, `P` sparse, `L` hard-link
+    /// alias. Empty when none apply.
+    pub attributes: String,
     /// Whether an expand arrow makes sense.
     pub has_children: bool,
+}
+
+/// The attribute letters for one node's flags.
+fn attributes_of(flags: crate::model::entry::EntryFlags) -> String {
+    use crate::model::entry::EntryFlags as F;
+    let mut out = String::new();
+    for (bit, letter) in [
+        (F::HIDDEN, 'H'),
+        (F::SYSTEM, 'S'),
+        (F::REPARSE, 'R'),
+        (F::COMPRESSED, 'C'),
+        (F::SPARSE, 'P'),
+        (F::ALIAS, 'L'),
+    ] {
+        if flags.contains(bit) {
+            out.push(letter);
+        }
+    }
+    out
 }
 
 /// One row per scanned volume: the tree's top level.
@@ -97,6 +125,11 @@ fn row_for(index: &Index, vol: u16, id: NodeId, parent_alloc: Option<u64>) -> Tr
         _ => 100.0,
     };
 
+    let files = node.file_count();
+    let dirs = node
+        .dir_count()
+        .saturating_sub(u32::from(node.is_directory()));
+
     TreeRow {
         vol,
         id: id.get(),
@@ -108,11 +141,16 @@ fn row_for(index: &Index, vol: u16, id: NodeId, parent_alloc: Option<u64>) -> Tr
         size_display: human_size(size),
         allocated_display: human_size(allocated),
         percent_of_parent,
-        files: node.file_count(),
-        dirs: node
-            .dir_count()
-            .saturating_sub(u32::from(node.is_directory())),
+        files,
+        dirs,
+        items: if node.is_directory() {
+            files.saturating_add(dirs)
+        } else {
+            0
+        },
+        modified: node.times().mtime,
         modified_display: format_mtime(node.times().mtime),
+        attributes: attributes_of(node.flags()),
         has_children: node.child_count() > 0,
     }
 }
@@ -196,6 +234,35 @@ mod tests {
         // Subtree counts on the directory row.
         assert_eq!(rows[1].files, 2);
         assert_eq!(rows[1].dirs, 1, "sub, not counting docs itself");
+        assert_eq!(rows[1].items, 3, "items = files + folders");
+        assert_eq!(rows[0].items, 0, "files carry no Items count");
+
+        // Raw mtime rides along as the sort key; plain entries have no
+        // attribute letters.
+        assert_eq!(rows[0].modified, 86_400_000_000_000);
+        assert_eq!(rows[0].attributes, "");
+    }
+
+    #[test]
+    fn attribute_letters_reflect_the_flags() {
+        let caps = crate::service::scan::ntfs_caps("C:".to_string());
+        let mut b = IndexBuilder::new(caps, CancellationToken::new());
+        let flagged = RawEntry {
+            fs_id: 20,
+            parent_id: 5,
+            name: "pagefile.sys",
+            size: 100,
+            allocated: 100,
+            times: Times::default(),
+            flags: EntryFlags::HIDDEN
+                .union(EntryFlags::SYSTEM)
+                .union(EntryFlags::COMPRESSED),
+        };
+        let _ = b.push_batch(&[dir(5, 5, ""), flagged]);
+        let index = b.finish().0;
+
+        let rows = children(&[&index], 0, index.root().get());
+        assert_eq!(rows[0].attributes, "HSC");
     }
 
     #[test]

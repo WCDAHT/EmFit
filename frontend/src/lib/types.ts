@@ -7,6 +7,8 @@
 export interface AppConfig {
   schema_version: number;
   theme: "dark" | "light" | null;
+  /** Size-unit setting consumed by `lib/format.ts` ("dynamic" or a fixed unit). */
+  size_unit: string;
   treemap: TreemapConfig;
 }
 
@@ -152,7 +154,14 @@ export interface TreeRowDto {
   percent_of_parent: number;
   files: number;
   dirs: number;
+  /** files + dirs for a directory; 0 for a file (renders blank). */
+  items: number;
+  /** Raw mtime, ns since the Unix epoch (0 = unknown) — the sort key. */
+  modified: number;
   modified_display: string;
+  /** Attribute letters: H hidden, S system, R reparse, C compressed,
+   *  P sparse, L hard-link alias. */
+  attributes: string;
   has_children: boolean;
 }
 
