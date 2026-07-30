@@ -17,7 +17,7 @@
     and rows render viewport-locked. Engaged only past ~1M rows.
 -->
 <script lang="ts">
-  import { getRows } from "../ipc";
+  import { getRows, showContextMenu } from "../ipc";
   import { formatSize } from "../format";
   import {
     session,
@@ -184,6 +184,10 @@
           tabindex={-1}
           aria-rowindex={globalRow + 1}
           onmousedown={(e) => onRowClick(e, globalRow)}
+          oncontextmenu={(e) => {
+            e.preventDefault();
+            if (!row.is_synthetic) void showContextMenu(row.vol, row.id);
+          }}
         >
           <span class="cell name" title={row.name}>
             <Icon

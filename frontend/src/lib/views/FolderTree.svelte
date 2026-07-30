@@ -19,7 +19,7 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { nodeLineage, treeChildren, treeRoots } from "../ipc";
+  import { nodeLineage, showContextMenu, treeChildren, treeRoots } from "../ipc";
   import { session } from "../session.svelte";
   import { formatSize } from "../format";
   import type { TreeRowDto } from "../types";
@@ -359,6 +359,10 @@
               tabindex={-1}
               onmousedown={() => onRowClick(row)}
               ondblclick={() => onRowDblClick(row)}
+              oncontextmenu={(e) => {
+                e.preventDefault();
+                if (!row.synthetic) void showContextMenu(row.vol, row.id);
+              }}
             >
               <span class="cell name-cell">
                 <span class="indent" style:width="{f.depth * 16}px"></span>

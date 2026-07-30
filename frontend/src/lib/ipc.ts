@@ -133,3 +133,9 @@ export function typeBreakdown(limit: number): Promise<TypeRowDto[]> {
 export function nodeInfo(vol: number, id: number): Promise<NodeInfoDto | null> {
   return invoke("node_info", { vol, id });
 }
+
+/** Native shell context menu for a node, at the cursor (fire-and-forget —
+ *  the menu is hosted on a dedicated OS thread). */
+export function showContextMenu(vol: number, id: number): Promise<void> {
+  return invoke("show_context_menu", { vol, id });
+}

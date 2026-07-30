@@ -430,6 +430,63 @@ pub fn node_info(state: State<'_, AppState>, vol: u16, id: u32) -> Option<NodeIn
     })
 }
 
+/// Show the native shell context menu for a node, at the cursor (roadmap
+/// M4). The menu is tracked on the main thread with the app window as its
+/// owner — the window is foreground from the very right-click, which is
+/// what keeps the menu open (see `shell_menu`). Verbs — including any the
+/// user picks that mutate the filesystem — are the shell's business, and
+/// the index does not react until a rescan (deletion marking arrives with
+/// M5's journal watcher).
+#[tauri::command]
+pub fn show_context_menu(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    vol: u16,
+    id: u32,
+) -> CommandResult<()> {
+    let path = {
+        let inner = state.inner.lock().unwrap();
+        let Some(volume) = inner.volumes.get(vol as usize) else {
+            return Ok(());
+        };
+        let index = volume.index.as_ref();
+        if (id as usize) >= index.len() {
+            return Ok(());
+        }
+        let node_id = NodeId::new(id);
+        if index.node(node_id).is_synthetic() {
+            return Ok(()); // free space / placeholders: nothing on disk
+        }
+        index.path(node_id)
+    };
+    // A bare drive ("C:") parses as drive-relative; the shell needs "C:\".
+    let path = if path.ends_with(':') {
+        format!("{path}\\")
+    } else {
+        path
+    };
+
+    let Some(window) = app.webview_windows().into_values().next() else {
+        return Ok(());
+    };
+    #[cfg(windows)]
+    {
+        // Raw isize handle, so tauri's and our `windows` crate versions
+        // never need to agree on an HWND type.
+        let hwnd = window
+            .hwnd()
+            .map_err(|e| CommandError::Shell(format!("window handle: {e}")))?
+            .0 as isize;
+        let _ = window.run_on_main_thread(move || crate::shell_menu::show_at(hwnd, &path));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        crate::shell_menu::show_at(0, &path);
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // the search worker
 // ---------------------------------------------------------------------------

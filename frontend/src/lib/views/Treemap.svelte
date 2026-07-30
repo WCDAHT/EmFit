@@ -20,7 +20,7 @@
   Backspace / Alt+Left / breadcrumb go back up.
 -->
 <script lang="ts">
-  import { nodeInfo, nodeLineage, treemapLayout, typeBreakdown } from "../ipc";
+  import { nodeInfo, nodeLineage, showContextMenu, treemapLayout, typeBreakdown } from "../ipc";
   import { formatSize } from "../format";
   import { session } from "../session.svelte";
   import type { NodeInfoDto, TreemapRectDto, TypeRowDto } from "../types";
@@ -706,6 +706,19 @@
     }
   }
 
+  /** Right-click: focus the block and open the native shell menu for it.
+   *  Aggregates carry no real node and synthetics have nothing on disk. */
+  function onContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    const bounds = canvas?.getBoundingClientRect();
+    if (!bounds) return;
+    const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
+    if (hit && !hit.aggregate && !hit.synthetic) {
+      session.focus = { vol: hit.vol, id: hit.id };
+      void showContextMenu(hit.vol, hit.id);
+    }
+  }
+
   function onDblClick(e: MouseEvent) {
     const bounds = canvas?.getBoundingClientRect();
     if (!bounds) return;
@@ -808,6 +821,7 @@
       onmouseleave={() => (hover = null)}
       onclick={onClick}
       ondblclick={onDblClick}
+      oncontextmenu={onContextMenu}
       onkeydown={onKeydown}
     ></canvas>
 

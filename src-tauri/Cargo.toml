@@ -33,5 +33,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 directories = { workspace = true }
 
+# The native shell context menu (`shell_menu`): IContextMenu hosting.
+# Windows-only, like the core's volume/elevation modules.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
 [lints]
 workspace = true

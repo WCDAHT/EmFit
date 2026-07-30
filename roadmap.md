@@ -172,19 +172,31 @@ full view.
 
 **Goal:** act on what you found, and get it out.
 
+**Rescoped 2026-07-30 (user direction):** EmFit ships **no mutating file
+operations of its own**. Right-click hands the node to the **real Windows
+shell context menu** (`IContextMenu`), exactly as WizTree does; deleting,
+renaming, and moving are the shell's entries and the shell's business. The
+only EmFit-added item is **Copy path**. Because nothing mutates through the
+app, the index cannot observe changes from its own actions — index updating
+therefore moves to M5, where the USN journal is the observer, and shrinks
+to deletion-marking only (see M5).
+
 **Lands**
 
-- File operations ([features.md](./features.md) §5): open, open in Explorer, Properties, copy path, rename, **delete to Recycle Bin vs. permanent as distinct actions**, copy/move to folder, drag out.
-- Real Windows shell context menu (`IContextMenu`).
-- **Index updates after an operation** — rows disappear, sizes re-roll up the parent chain, no rescan. This is the first incremental mutation of the index and the groundwork M5 builds on.
+- Right-click in **every view** — file list, folder tree, treemap — opens
+  the native shell context menu for that file or folder, with one appended
+  EmFit item: **Copy path**. No other custom entries, none mutating.
 - Export ([features.md](./features.md) §6): CSV and JSON via `serde_json` with correct escaping (v1's hand-rolled writers are malformed for names containing quotes), streaming rather than in-memory, **exports what is currently shown** by default, folder tree export, treemap PNG.
 - Row detail pane: full path, all timestamps, attributes, hard links and their paths, alternate data streams.
 
 **Exit criteria**
 
+- Right-click on a row/rect in each of the three views opens the shell menu
+  for the correct path, including shell-extension submenus ("Open with",
+  "Send to"), and its verbs execute.
+- **Copy path** puts the full absolute path on the clipboard; the menu
+  contains no other EmFit-added or mutating-custom entries.
 - Round-trip test: export CSV and JSON containing names with quotes, commas, newlines, emoji, and non-BMP characters; re-import and compare.
-- Deleting a 10 GB folder updates every ancestor's size correctly without a rescan.
-- Recycle Bin and permanent delete are visually distinct and separately confirmed.
 
 ---
 
@@ -194,7 +206,13 @@ full view.
 
 **Lands**
 
-- USN journal watcher ([features.md](./features.md) §1.5): creates, deletes, renames, size changes applied to the live index; incremental rollup along the parent chain; debounced UI refresh. Gated on `caps.live_updates`.
+- USN journal watcher ([features.md](./features.md) §1.5), **rescoped to
+  deletion-marking only** (user direction 2026-07-30): a node observed
+  deleted is *marked* deleted — red border in the treemap, flagged in the
+  tree and list — and stays marked until the next rescan. Nothing is
+  removed from the index, no sizes re-roll. Creations, renames, size
+  changes, and even the reappearance of a marked path change **nothing**;
+  only deletions register. Gated on `caps.live_updates`.
 - Journal-gap recovery — wrapped journal or changed id falls back to a full rescan rather than diverging silently.
 - Scan save/load ([features.md](./features.md) §1.6) — serialize the flat index and arena. **This is the `1.0.0` gate**, because the format becomes a compatibility promise once anyone has a saved scan.
 - Per-volume scan cache reloaded at startup, with volume serial and timestamp so staleness is visible.
@@ -202,7 +220,7 @@ full view.
 
 **Exit criteria**
 
-- Creating, renaming, moving, and deleting files in Explorer is reflected in the list within a second, with folder sizes correct afterward.
+- Deleting a file in Explorer marks it deleted in every view within a second (red border in the treemap); creating, renaming, or restoring files changes nothing until a rescan.
 - A scan saved and reloaded is byte-identical in its query results to the original.
 - Format carries a `schema_version` (STANDARDS §4.5) and endianness is decided and documented.
 - Killing the app mid-scan leaves no corrupt cache.
@@ -272,5 +290,5 @@ assertion mode that re-rolls the whole index and compares.
 | `FsScanner` trait | M7 | Premature with one implementation; the push discipline preserves the option |
 | Scan file format | M5 | Becomes a compatibility promise the moment it ships |
 | Full CLI surface | M6 | A minimal verification CLI in M1 covers the testing need |
-| USN live updates | M5 | Needs incremental index mutation, which M4 builds first |
+| USN live updates | M5 | Deletion-marking only; the journal is the sole observer since M4 ships no mutating operations |
 | Out-of-process scanners | — | Attractive for sandboxing untrusted images; not needed for NTFS ([architecture.md](./architecture.md) §13) |

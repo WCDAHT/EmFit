@@ -9,6 +9,7 @@
 mod commands;
 mod dto;
 mod error;
+mod shell_menu;
 mod state;
 
 use std::sync::Mutex;
@@ -102,7 +103,8 @@ pub fn run() {
             commands::node_lineage,
             commands::treemap_layout,
             commands::type_breakdown,
-            commands::node_info
+            commands::node_info,
+            commands::show_context_menu
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
