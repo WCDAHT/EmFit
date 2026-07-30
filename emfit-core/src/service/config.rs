@@ -88,56 +88,22 @@ impl Default for Config {
 ///   extension→color list. **Not in the current milestone:** today it falls
 ///   back to the built-in category palette (`--category-N`); the editable
 ///   per-extension list (and the ranked palette itself) should eventually
-///   persist here next to `size_ranges`.
-///
-/// `"size"` (legacy bucket mode) is retired; old configs carrying it are
-/// mapped to `"ranked"` on load by the frontend. `size_ranges` stays
-/// persisted for that legacy data but nothing reads it anymore.
+///   persist here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TreemapConfig {
     /// `"ranked"` (WizTree size-ranked palette) or `"extension"`.
     pub color_mode: String,
-    /// Legacy size-bucket data (retired mode); kept so old configs
-    /// round-trip losslessly.
-    pub size_ranges: Vec<SizeRange>,
-}
-
-/// One color bucket. `max_bytes` stays within `i64` because the TOML format
-/// has no unsigned 64-bit integers; the last bucket is a catch-all anyway.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SizeRange {
-    pub max_bytes: u64,
-    /// `#rrggbb`.
-    pub color: String,
+    /// Draw the synthetic free-space block in the treemap. Off by default:
+    /// the map shows only real files unless the user opts in.
+    pub show_free_space: bool,
 }
 
 impl Default for TreemapConfig {
     fn default() -> Self {
         Self {
             color_mode: "ranked".to_string(),
-            size_ranges: vec![
-                SizeRange {
-                    max_bytes: 1 << 20, // ≤ 1 MiB
-                    color: "#4f8cc9".to_string(),
-                },
-                SizeRange {
-                    max_bytes: 16 << 20, // ≤ 16 MiB
-                    color: "#3fb950".to_string(),
-                },
-                SizeRange {
-                    max_bytes: 256 << 20, // ≤ 256 MiB
-                    color: "#e3b341".to_string(),
-                },
-                SizeRange {
-                    max_bytes: 1 << 30, // ≤ 1 GiB
-                    color: "#f0883e".to_string(),
-                },
-                SizeRange {
-                    max_bytes: 1 << 60, // catch-all
-                    color: "#f85149".to_string(),
-                },
-            ],
+            show_free_space: false,
         }
     }
 }

@@ -368,6 +368,7 @@ pub fn treemap_layout(
     width: f32,
     height: f32,
     depth: u8,
+    show_free_space: bool,
 ) -> Vec<TreemapRectDto> {
     let inner = state.inner.lock().unwrap();
     let indices: Vec<&emfit_core::model::index::Index> =
@@ -383,6 +384,7 @@ pub fn treemap_layout(
         } else {
             depth.clamp(1, 64)
         },
+        show_free_space,
         ..TreemapOptions::default()
     };
     treemap::layout(&indices, drill.map(|d| (d.vol, d.id)), &options)

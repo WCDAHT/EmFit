@@ -83,8 +83,8 @@ goes stale.
   (gray) entry; `extension` colors by extension via the built-in category
   palette for now — TODO(future milestone): user-configurable
   extension→color list (and palette) in settings, persisted in
-  `TreemapConfig`. Legacy `size` bucket mode is retired (old configs map to
-  `ranked`; `size_ranges` kept only for round-tripping).
+  `TreemapConfig`. The old `size` bucket mode is gone entirely (no legacy
+  config support — pre-release, nothing to migrate).
 - Tree-list double-click must NOT re-root the treemap; drilling happens
   only from the map (double-click / breadcrumb).
 - Treemap height set by a splitter that applies on drag **release** only.

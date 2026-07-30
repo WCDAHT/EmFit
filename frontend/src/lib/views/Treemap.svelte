@@ -72,6 +72,7 @@
     void session.viewEpoch;
     void session.drill;
     void session.treemapDepth;
+    void session.showFreeSpace;
     void cssW;
     void cssH;
     void refetch();
@@ -131,7 +132,13 @@
     }
     fetching = true;
     try {
-      rects = await treemapLayout(session.drill, cssW, cssH, session.treemapDepth);
+      rects = await treemapLayout(
+        session.drill,
+        cssW,
+        cssH,
+        session.treemapDepth,
+        session.showFreeSpace,
+      );
     } finally {
       fetching = false;
       if (refetchWanted) {

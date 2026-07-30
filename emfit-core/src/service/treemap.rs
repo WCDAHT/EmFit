@@ -39,8 +39,10 @@
 //! four hard-link names draws one 100 MB rectangle, not four: hard-link
 //! aliases carry zero allocated bytes and vanish from the geometry, sparse
 //! and compressed files occupy their real footprint, and the synthetic
-//! free-space row fills the volume out to its capacity. Labels may still
-//! show logical size; only the geometry is allocated.
+//! free-space row — hidden by default behind
+//! [`TreemapOptions::show_free_space`] — fills the volume out to its
+//! capacity when enabled. Labels may still show logical size; only the
+//! geometry is allocated.
 //!
 //! # Web adjustments
 //!
@@ -127,6 +129,10 @@ pub struct TreemapOptions {
     /// At most this many individually-placed children per directory; the
     /// rest aggregate. Bounds the IPC payload on pathological flat folders.
     pub max_children: usize,
+    /// Draw the synthetic free-space row (and any other builder-invented
+    /// *file* rows). Off by default — a settings toggle; synthetic
+    /// *directories* (orphan placeholders holding real files) always show.
+    pub show_free_space: bool,
 }
 
 impl Default for TreemapOptions {
@@ -137,6 +143,7 @@ impl Default for TreemapOptions {
             max_depth: 6,
             min_area: 2.0,
             max_children: 2000,
+            show_free_space: false,
         }
     }
 }
@@ -223,7 +230,20 @@ pub fn layout(
                 .enumerate()
                 .map(|(slot, index)| {
                     let root = index.node(index.root());
-                    (slot, root.total_allocated() as f64)
+                    let mut weight = root.total_allocated() as f64;
+                    // With free space hidden, a strip's width reflects only
+                    // what its children will actually tile — otherwise a
+                    // near-empty large drive gets a huge, mostly-meaningless
+                    // column.
+                    if !options.show_free_space {
+                        for &child in index.children(index.root()) {
+                            let node = index.node(child);
+                            if node.is_synthetic() && !node.is_directory() {
+                                weight -= node.allocated() as f64;
+                            }
+                        }
+                    }
+                    (slot, weight)
                 })
                 .filter(|&(_, weight)| weight > 0.0)
                 .collect();
@@ -347,6 +367,13 @@ fn descend(
     let mut children: Vec<(NodeId, f64)> = index
         .children(dir)
         .iter()
+        .filter(|&&child| {
+            // Synthetic file rows (the free-space block) hide behind the
+            // settings toggle; synthetic directories are orphan placeholders
+            // holding real files and always show.
+            let node = index.node(child);
+            options.show_free_space || !node.is_synthetic() || node.is_directory()
+        })
         .map(|&child| {
             let node = index.node(child);
             let weight = if node.is_directory() {
@@ -825,7 +852,26 @@ mod tests {
         let _ = b.push_batch(&[dir(5, 5, ""), file(20, 5, "data.bin", 1000), free]);
         let index = b.finish().0;
 
+        // Hidden by default (a settings toggle): the map shows only real
+        // files, and data.bin tiles the whole child area alone.
         let rects = layout(&[&index], None, &options());
+        assert!(
+            !rects.iter().any(|r| r.name == "Free space"),
+            "free space is hidden by default"
+        );
+        let data = rects.iter().find(|r| r.name == "data.bin").unwrap();
+        let share = (data.w * data.h) / (1000.0 * 500.0);
+        assert!((share - 1.0).abs() < 0.05, "data.bin covers {share:.3}");
+
+        // Toggled on, it draws as a plain block like WizTree's.
+        let rects = layout(
+            &[&index],
+            None,
+            &TreemapOptions {
+                show_free_space: true,
+                ..options()
+            },
+        );
         let free_rect = rects.iter().find(|r| r.name == "Free space").unwrap();
         assert!(free_rect.synthetic);
         // 3000 of 4000 bytes → 75% of the canvas (less the root's header

@@ -14,7 +14,6 @@ import type {
   RawQueryDto,
   ScanTarget,
   SelectionSummaryDto,
-  SizeRange,
   SortKey,
   VolumeDto,
 } from "./types";
@@ -78,9 +77,9 @@ export const session = $state({
    *  "extension" = the category palette (per-extension configurable list is
    *  a future milestone). */
   colorMode: "ranked" as "ranked" | "extension",
-  /** Legacy size buckets from config (retired mode); kept only so saves
-   *  round-trip the persisted data. */
-  sizeRanges: [] as SizeRange[],
+  /** Draw the synthetic free-space block in the treemap (config-persisted;
+   *  off by default). */
+  showFreeSpace: false,
   /** Fixed height of the treemap row, set by the splitter on drag release;
    *  null = the default flex split. */
   treemapHeight: null as number | null,

@@ -12,14 +12,9 @@ export interface AppConfig {
 
 /** Mirror of `TreemapConfig`: how the treemap colors rectangles. */
 export interface TreemapConfig {
-  color_mode: string; // "ranked" | "extension" ("size" is legacy → ranked)
-  size_ranges: SizeRange[];
-}
-
-/** One size→color bucket (ascending; last is the catch-all). */
-export interface SizeRange {
-  max_bytes: number;
-  color: string;
+  color_mode: string; // "ranked" | "extension"
+  /** Draw the synthetic free-space block (off by default). */
+  show_free_space: boolean;
 }
 
 // Mirror of `ProgressDto` (a `#[serde(tag = "kind")]` enum).

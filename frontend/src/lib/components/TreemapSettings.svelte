@@ -19,22 +19,26 @@
   let { open, onClose }: Props = $props();
 
   let mode = $state<"ranked" | "extension">("ranked");
+  let showFreeSpace = $state(false);
 
   // Re-seed the editor from the live session every time it opens.
   $effect(() => {
     if (open) {
       mode = session.colorMode;
+      showFreeSpace = session.showFreeSpace;
     }
   });
 
   async function save() {
     const config = await getConfig();
-    // size_ranges passes through untouched: legacy data from the retired
-    // size-bucket mode, kept so old configs round-trip.
-    config.treemap = { color_mode: mode, size_ranges: session.sizeRanges };
+    config.treemap = {
+      color_mode: mode,
+      show_free_space: showFreeSpace,
+    };
     await setConfig(config);
 
     session.colorMode = mode;
+    session.showFreeSpace = showFreeSpace;
     queryChanged(true); // repaints the view epoch downstream
     onClose();
   }
@@ -81,6 +85,11 @@
           configurable here in a later milestone.
         </p>
       {/if}
+
+      <label class="toggle">
+        <input type="checkbox" bind:checked={showFreeSpace} />
+        Show free space as a block
+      </label>
 
       <footer>
         <button class="btn" onclick={onClose}>Cancel</button>
@@ -156,6 +165,18 @@
     margin: 0;
     color: var(--text-muted);
     font-size: var(--font-size-caption);
+  }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-secondary);
+    font-size: var(--font-size-body);
+    cursor: pointer;
+  }
+  .toggle input {
+    accent-color: var(--accent);
   }
 
   footer {

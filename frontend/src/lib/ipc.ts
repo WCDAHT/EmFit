@@ -119,8 +119,9 @@ export function treemapLayout(
   width: number,
   height: number,
   depth: number,
+  showFreeSpace: boolean,
 ): Promise<TreemapRectDto[]> {
-  return invoke("treemap_layout", { drill, width, height, depth });
+  return invoke("treemap_layout", { drill, width, height, depth, showFreeSpace });
 }
 
 /** Aggregate every file by extension. */

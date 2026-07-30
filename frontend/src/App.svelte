@@ -112,9 +112,8 @@
     void syncThemeWithConfig();
     void getConfig().then((cfg) => {
       if (cfg.treemap) {
-        // Legacy "size" mode maps to the ranked default.
         session.colorMode = cfg.treemap.color_mode === "extension" ? "extension" : "ranked";
-        session.sizeRanges = cfg.treemap.size_ranges ?? [];
+        session.showFreeSpace = cfg.treemap.show_free_space ?? false;
       }
     });
 
