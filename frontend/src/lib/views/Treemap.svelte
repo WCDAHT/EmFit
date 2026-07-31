@@ -98,12 +98,30 @@
   // Two paint layers, so hover never repays the cost of the scene:
   // the scene (all rects) renders into an offscreen canvas only when its
   // inputs change; hover/focus changes just blit it and add two outlines.
+  //
+  // Coalesced through rAF: a layout refetch and the extension-rank fetch
+  // resolve back-to-back, and without coalescing each triggered a FULL
+  // scene rasterization — a profiler showed the whole pipeline (grid,
+  // palette, per-pixel cushion pass) running twice per update. The rAF
+  // callback runs untracked, so every reactive value drawScene consumes
+  // MUST be listed here (that includes sizeUnit — the labels format sizes).
+  let sceneQueued = false;
+  function scheduleScene() {
+    if (sceneQueued) return;
+    sceneQueued = true;
+    requestAnimationFrame(() => {
+      sceneQueued = false;
+      drawScene();
+    });
+  }
+
   $effect(() => {
     void session.colorMode;
     void session.typeFilter.size;
+    void session.sizeUnit;
     void rects;
     void extRows;
-    drawScene();
+    scheduleScene();
   });
 
   // Coalesce to one composite per animation frame: over 2px tiles the hover
@@ -163,34 +181,43 @@
     mode: "ranked" | "extension";
     /** extension → palette rank, from the view-epoch type breakdown. */
     rank: Map<string, number>;
-    categories: string[]; // slots 1..8
-    neutral: string;
-    synthetic: string;
+    wiz: [number, number, number][];
+    categories: [number, number, number][]; // slots 1..8
+    neutral: [number, number, number];
+    synthetic: [number, number, number];
+    aggregateRgb: [number, number, number];
   }
 
   function buildPalette(): PaintPalette {
     const rank = new Map<string, number>();
     extRows.forEach((row, i) => rank.set(row.extension, i));
+    // parseColor memoizes, so re-resolving the static palettes per scene is
+    // ~free — what matters is that the PER-RECT path below touches only
+    // numbers, never CSS strings (the string version profiled ~2ms/scene).
     return {
       mode: session.colorMode,
       rank,
-      categories: Array.from({ length: 8 }, (_, i) => cssVar(`--category-${i + 1}`)),
-      neutral: cssVar("--text-muted"),
-      synthetic: cssVar("--surface-hover"),
+      wiz: WIZ_PALETTE.map(parseColor),
+      categories: Array.from({ length: 8 }, (_, i) =>
+        parseColor(cssVar(`--category-${i + 1}`)),
+      ),
+      neutral: parseColor(cssVar("--text-muted")),
+      synthetic: parseColor(cssVar("--surface-hover")),
+      aggregateRgb: parseColor(cssVar("--border")),
     };
   }
 
   const WIZ_OTHER = WIZ_PALETTE[WIZ_PALETTE.length - 1];
 
-  function leafColor(r: TreemapRectDto, p: PaintPalette): string {
+  function leafRgb(r: TreemapRectDto, p: PaintPalette): [number, number, number] {
     if (r.synthetic) return p.synthetic;
     if (p.mode === "ranked") {
       // WizTree's scheme: rank i → palette[i]; unranked extensions — and
       // unexpanded folders standing in for whole subtrees — take the last
       // (gray) entry.
-      if (r.is_dir) return WIZ_OTHER;
+      if (r.is_dir) return p.wiz[p.wiz.length - 1];
       const rank = p.rank.get(extensionOf(r.name));
-      return rank === undefined ? WIZ_OTHER : WIZ_PALETTE[rank];
+      return rank === undefined ? p.wiz[p.wiz.length - 1] : p.wiz[rank];
     }
     // "extension" mode: the category palette until per-extension color
     // configuration lands (see TreemapConfig in Rust).
@@ -228,25 +255,36 @@
   const RATIO = 1.0;
   const EDGE = 0.8;
 
-  type Surface = [number, number, number, number]; // s1x, s2x, s1y, s2y
+  type Surface = Float64Array; // [s1x, s2x, s1y, s2y]
 
-  /** Add a node's cushion ridge (doc §4) to a copy of `c`. The per-axis
-   *  gate is WizTree's: only when the span rounds to a nonzero width. */
-  function addRidge(c: Surface, r: TreemapRectDto, h: number): Surface {
-    let [s1x, s2x, s1y, s2y] = c;
-    const x2 = r.x + r.w;
-    const y2 = r.y + r.h;
+  const ZERO_SURFACE: Surface = new Float64Array(4);
+  /** One reusable surface per stack depth + one scratch for solid blocks:
+   *  the walk allocates NOTHING. (A per-rect tuple version profiled at
+   *  ~4ms of allocation plus minor-GC churn per scene.) */
+  const surfacePool: Surface[] = [];
+  const scratchSurface: Surface = new Float64Array(4);
+
+  /** `dst = src + ridge(rect, h)` (doc §4). The per-axis gate is WizTree's:
+   *  only when the span rounds to a nonzero width. */
+  function ridgeInto(dst: Surface, src: Surface, r: TreemapRectDto, h: number) {
+    dst.set(src);
     if (Math.round(r.w) !== 0) {
       const k = (h * 4) / r.w;
-      s1x += k * (x2 + r.x);
-      s2x -= k;
+      dst[0] += k * (r.x + r.w + r.x);
+      dst[1] -= k;
     }
     if (Math.round(r.h) !== 0) {
       const k = (h * 4) / r.h;
-      s1y += k * (y2 + r.y);
-      s2y -= k;
+      dst[2] += k * (r.y + r.h + r.y);
+      dst[3] -= k;
     }
-    return [s1x, s2x, s1y, s2y];
+  }
+
+  /** Ridge height at depth d — `H0·F^d`, memoized (no `**` per rect). */
+  const hPow: number[] = [H0];
+  function hAt(depth: number): number {
+    while (hPow.length <= depth) hPow.push(hPow[hPow.length - 1] * F);
+    return hPow[depth];
   }
 
   const rgbCache = new Map<string, [number, number, number]>();
@@ -312,11 +350,13 @@
     const ctx = scene.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    buildGrid();
+    // The hit-test grid is rebuilt off the paint path (idle callback): it
+    // profiled at ~3ms and nothing needs it synchronously — hover and the
+    // focus/deleted outlines tolerate one briefly-stale frame.
+    scheduleGridBuild();
 
     const surface = cssVar("--surface-sunken");
     const headerText = cssVar("--text-primary");
-    const aggregateFill = cssVar("--border");
     const palette = buildPalette();
     // A plain Set copy: the loop must not read proxied session state per rect.
     const filter = new Set(session.typeFilter);
@@ -356,7 +396,17 @@
     );
 
     /** §7 of the recovered shader: per-pixel normal → light → brightness.
-     *  Bounds round INWARD (trunc(lo+0.5) .. trunc(hi−0.5)) in device px. */
+     *  Bounds round INWARD (trunc(lo+0.5) .. trunc(hi−0.5)) in device px.
+     *
+     *  Hot loop, strength-reduced: `nx` is linear in the pixel column, so
+     *  it advances by one addition instead of being recomputed (the naïve
+     *  form — a divide and two multiplies per pixel — profiled as the
+     *  scene's single biggest cost); the dim blend
+     *  `bg + (c·bright − bg)·0.25 = 0.75·bg + 0.25·c·bright` folds into a
+     *  per-rect scale+offset, so the loop is branch-free on it. */
+    const invDpr = 1 / dpr;
+    const IA_R = IA * RATIO;
+    const IC_R = IC * RATIO;
     const shadeBlock = (
       r: TreemapRectDto,
       s: Surface,
@@ -373,27 +423,30 @@
       const rr = Math.min(right, deviceW - 1);
       const bb = Math.min(bottom, deviceH - 1);
       const [s1x, s2x, s1y, s2y] = s;
+      const scaleR = dimmed ? rgb[0] * 0.25 : rgb[0];
+      const scaleG = dimmed ? rgb[1] * 0.25 : rgb[1];
+      const scaleB = dimmed ? rgb[2] * 0.25 : rgb[2];
+      const offR = dimmed ? bg[0] * 0.75 : 0;
+      const offG = dimmed ? bg[1] * 0.75 : 0;
+      const offB = dimmed ? bg[2] * 0.75 : 0;
+      const dnx = -2 * s2x * invDpr;
+      const nx0 = -(2 * s2x * ((l + 0.5) * invDpr) + s1x);
       for (let py = t; py <= bb; py++) {
-        const ny = -(2 * s2y * ((py + 0.5) / dpr) + s1y);
+        const ny = -(2 * s2y * ((py + 0.5) * invDpr) + s1y);
         const nyLight = ny * LY + LZ;
         const ny21 = ny * ny + 1;
+        const lastRow = py === bottom;
+        let nx = nx0;
         let at = (py * deviceW + l) * 4;
-        for (let pxi = l; pxi <= rr; pxi++, at += 4) {
-          const nx = -(2 * s2x * ((pxi + 0.5) / dpr) + s1x);
+        for (let pxi = l; pxi <= rr; pxi++, at += 4, nx += dnx) {
           let intensity = (nx * LX + nyLight) / Math.sqrt(nx * nx + ny21);
           if (intensity > 1) intensity = 1;
-          if (pxi === right || py === bottom) intensity *= edge;
-          let bright = (IA * intensity + IC) * RATIO;
+          if (pxi === right || lastRow) intensity *= edge;
+          let bright = IA_R * intensity + IC_R;
           if (bright < 0) bright = 0;
-          let cr = rgb[0] * bright;
-          let cg = rgb[1] * bright;
-          let cb = rgb[2] * bright;
-          if (dimmed) {
-            // The old 25%-alpha fill over the background, done in-buffer.
-            cr = bg[0] + (cr - bg[0]) * 0.25;
-            cg = bg[1] + (cg - bg[1]) * 0.25;
-            cb = bg[2] + (cb - bg[2]) * 0.25;
-          }
+          const cr = offR + scaleR * bright;
+          const cg = offG + scaleG * bright;
+          const cb = offB + scaleB * bright;
           data[at] = cr > 255 ? 255 : cr;
           data[at + 1] = cg > 255 ? 255 : cg;
           data[at + 2] = cb > 255 ? 255 : cb;
@@ -405,18 +458,26 @@
     // Walk the pre-order list once, re-accumulating the surface coefficients
     // WizTree threads through its recursion: a stack keyed by depth, every
     // node adding its own ridge except at depth 0 (the drive strip is
-    // called with IsChild=1). Ridge height at depth d is H0·F^d.
-    const stack: { depth: number; s: Surface }[] = [];
-    const zero: Surface = [0, 0, 0, 0];
+    // called with IsChild=1). Ridge height at depth d is H0·F^d. Surfaces
+    // live in the per-depth pool — a stack level's array is only read while
+    // its descendants are processed, so reuse by depth is safe and the walk
+    // allocates nothing.
+    const stackDepths: number[] = [];
     for (const r of rects) {
-      while (stack.length > 0 && stack[stack.length - 1].depth >= r.depth) {
-        stack.pop();
+      while (stackDepths.length > 0 && stackDepths[stackDepths.length - 1] >= r.depth) {
+        stackDepths.pop();
       }
-      const parent = stack.length > 0 ? stack[stack.length - 1].s : zero;
+      const level = stackDepths.length;
+      const parent = level > 0 ? surfacePool[level - 1] : ZERO_SURFACE;
       if (r.is_dir && r.expanded) {
-        const s =
-          r.depth === 0 ? parent : addRidge(parent, r, H0 * F ** r.depth);
-        stack.push({ depth: r.depth, s });
+        if (surfacePool.length <= level) surfacePool.push(new Float64Array(4));
+        const s = surfacePool[level];
+        if (r.depth === 0) {
+          s.set(parent);
+        } else {
+          ridgeInto(s, parent, r, hAt(r.depth));
+        }
+        stackDepths.push(r.depth);
         continue;
       }
       // Solid block: add the node's OWN ridge, then shade. The current
@@ -427,14 +488,15 @@
       // The earlier decompilation (logs/secretClaude.txt §5 step 3) and van
       // Wijk's algorithm both ridge EVERY node except the root strip, and
       // that matches WizTree's output: each block is its own pillow.
-      const s = r.depth > 0 ? addRidge(parent, r, H0 * F ** r.depth) : parent;
+      let s = parent;
+      if (r.depth > 0) {
+        ridgeInto(scratchSurface, parent, r, hAt(r.depth));
+        s = scratchSurface;
+      }
       const dimmed =
         filterOn && !r.aggregate && !r.synthetic && !r.is_dir &&
         !filter.has(extensionOf(r.name));
-      const rgb = parseColor(
-        r.aggregate ? aggregateFill : leafColor(r, palette),
-      );
-      shadeBlock(r, s, rgb, dimmed);
+      shadeBlock(r, s, r.aggregate ? palette.aggregateRgb : leafRgb(r, palette), dimmed);
     }
     ctx.putImageData(sceneImg, 0, 0);
 
@@ -556,6 +618,26 @@
     const ms = performance.now() - started;
     if (ms > 8) {
       console.debug(`treemap: composite took ${ms.toFixed(1)}ms`);
+    }
+  }
+
+  let gridBuildQueued = false;
+  /** Grid rebuilds ride an idle callback (or a 0-timeout where rIC is
+   *  missing): the ~3ms cost leaves the paint frame, at the price of
+   *  hit-tests and outline lookups seeing the previous scene's rects for a
+   *  few milliseconds after a relayout. */
+  function scheduleGridBuild() {
+    if (gridBuildQueued) return;
+    gridBuildQueued = true;
+    const run = () => {
+      gridBuildQueued = false;
+      buildGrid();
+      scheduleComposite(); // outlines may have pointed at stale rects
+    };
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(run, { timeout: 100 });
+    } else {
+      setTimeout(run, 0);
     }
   }
 

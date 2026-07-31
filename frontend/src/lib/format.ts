@@ -51,16 +51,30 @@ function inUnit(bytes: number, unit: Exclude<SizeUnit, "dynamic">): number {
   return base / FACTOR[unit];
 }
 
+/** Cached formatters: `toLocaleString` constructs a new `Intl.NumberFormat`
+ *  on every call, which profiled as real money with the treemap formatting
+ *  hundreds of labels per scene. One reused formatter per precision is ~10×
+ *  cheaper with identical output. */
+const formatters = new Map<number, Intl.NumberFormat>();
+function formatter(digits: number): Intl.NumberFormat {
+  let f = formatters.get(digits);
+  if (!f) {
+    f = new Intl.NumberFormat(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: digits,
+    });
+    formatters.set(digits, f);
+  }
+  return f;
+}
+
 /** Value → string with precision that matches its magnitude: whole numbers
  *  for B/bit and anything ≥ 100, one decimal ≥ 10, else two. Thousands get
  *  separators, so "everything in KB" stays readable on a 2 TB volume. */
 function render(value: number, unit: Exclude<SizeUnit, "dynamic">): string {
   const whole = unit === "B" || unit === "bit" || value >= 100;
   const digits = whole ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  })} ${unit}`;
+  return `${formatter(digits).format(value)} ${unit}`;
 }
 
 /**
