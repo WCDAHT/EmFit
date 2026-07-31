@@ -567,10 +567,22 @@ fn requery(app: &AppHandle, sort_only: bool) {
                 }
             }
         };
+        let search_ms = started.elapsed().as_millis() as u64;
 
+        let sort_started = Instant::now();
         let indices: Vec<&emfit_core::model::index::Index> =
             volumes.iter().map(|(index, _)| index.as_ref()).collect();
         view::sort_hits(&indices, &mut hits, sort);
+
+        // Per-stage timing in the log: the first place to look when a query
+        // feels slow (the UI's elapsed number is the whole pipeline).
+        tracing::info!(
+            hits = hits.len(),
+            search_ms,
+            sort_ms = sort_started.elapsed().as_millis() as u64,
+            sort_only,
+            "view pipeline timings"
+        );
 
         let volumes_total: u64 = indices
             .iter()

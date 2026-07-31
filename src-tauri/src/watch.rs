@@ -167,7 +167,7 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
     while !cancel.is_cancelled() {
         polls += 1;
         if polls.is_multiple_of(30) {
-            tracing::debug!(key, polls, "usn: heartbeat (still polling)");
+            tracing::trace!(key, polls, "usn: heartbeat (still polling)");
         }
         match watcher.poll() {
             Ok(UsnPoll::Events(events)) => {
@@ -191,7 +191,7 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
                     }
                 }
                 if !events.is_empty() {
-                    tracing::info!(
+                    tracing::trace!(
                         key,
                         events = events.len(),
                         deletes,
@@ -221,7 +221,7 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
                     };
                     match vol {
                         Some(vol) => {
-                            tracing::info!(key, vol, ids = ids.len(), "usn: emitting usn:deleted");
+                            tracing::trace!(key, vol, ids = ids.len(), "usn: emitting usn:deleted");
                             let _ = app.emit(
                                 "usn:deleted",
                                 UsnDeletedDto {

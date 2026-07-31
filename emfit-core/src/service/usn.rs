@@ -306,7 +306,7 @@ mod windows_impl {
 
                 let (next, matched) = parse_events(&self.buf[..bytes as usize], REASON_MASK);
                 if bytes > 8 {
-                    tracing::debug!(
+                    tracing::trace!(
                         bytes,
                         matched = matched.len(),
                         start_usn = self.next_usn,

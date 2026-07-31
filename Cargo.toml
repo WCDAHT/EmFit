@@ -79,6 +79,24 @@ unused_must_use = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# `tauri dev` runs the DEBUG profile: at opt-level 0 the engine's tight
+# loops (MFT sweep, match-all search, 3M-row sorts) run 10-50× slower than
+# release, which makes perceived performance unjudgeable in dev. Optimize
+# the engine crate and all dependencies even in dev — they are built once
+# and cached; the shell crate stays at 0 for fast edit-compile cycles.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.emfit-core]
+opt-level = 2
+
+# For sampling profilers (samply, Superluminal, WPA): release-grade speed
+# with symbols kept. `cargo build --profile profiling`.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+
 # Release profile per STANDARDS Â§5.2. Tuned for shippable artifact size.
 [profile.release]
 opt-level = "z"

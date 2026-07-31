@@ -35,22 +35,47 @@
   /** Below the ~33.5M px element-height cap with margin. */
   const MAX_SPACER = 30_000_000;
 
+  // Columns match the folder tree's table design: fixed widths in state
+  // (drag the header edge to resize), one shared grid template with a
+  // trailing filler, sort on header click with caret indicators.
   interface Column {
     key: SortKey;
     label: string;
-    width: string;
+    w: number;
+    min: number;
     numeric?: boolean;
   }
   const COLUMNS: Column[] = [
-    { key: "name", label: "Name", width: "minmax(220px, 1.2fr)" },
-    { key: "size", label: "Size", width: "90px", numeric: true },
-    { key: "allocated", label: "Allocated", width: "90px", numeric: true },
-    { key: "extension", label: "Ext", width: "64px" },
-    { key: "modified", label: "Date Modified", width: "128px" },
-    { key: "kind", label: "Type", width: "92px" },
-    { key: "path", label: "Path", width: "minmax(200px, 1fr)" },
+    { key: "name", label: "Name", w: 280, min: 140 },
+    { key: "size", label: "Size", w: 92, min: 56, numeric: true },
+    { key: "allocated", label: "Allocated", w: 92, min: 56, numeric: true },
+    { key: "extension", label: "Ext", w: 64, min: 44 },
+    { key: "modified", label: "Date Modified", w: 122, min: 80 },
+    { key: "kind", label: "Type", w: 92, min: 56 },
+    { key: "path", label: "Path", w: 340, min: 120 },
   ];
-  const GRID = COLUMNS.map((c) => c.width).join(" ");
+
+  let colW = $state<Record<SortKey, number>>(
+    Object.fromEntries(COLUMNS.map((c) => [c.key, c.w])) as Record<SortKey, number>,
+  );
+  const template = $derived(
+    COLUMNS.map((c) => `${colW[c.key]}px`).join(" ") + " minmax(0, 1fr)",
+  );
+
+  let resizing: { key: SortKey; startX: number; startW: number } | null = $state(null);
+
+  function startResize(e: MouseEvent, key: SortKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    resizing = { key, startX: e.clientX, startW: colW[key] };
+  }
+
+  function onResizeMove(e: MouseEvent) {
+    if (!resizing) return;
+    const col = COLUMNS.find((c) => c.key === resizing!.key);
+    if (!col) return;
+    colW[resizing.key] = Math.max(col.min, resizing.startW + e.clientX - resizing.startX);
+  }
 
   const KIND_ICONS: Record<string, string> = {
     Folder: "folder2",
@@ -140,36 +165,51 @@
     }
   }
 
-  function sortIndicator(key: SortKey): string {
-    if (session.sortKey !== key) return "";
-    return session.sortAsc ? "▲" : "▼";
-  }
 </script>
 
-<div class="list">
-  <div class="header" style:grid-template-columns={GRID}>
-    {#each COLUMNS as col (col.key)}
-      <button
-        class="cell head"
-        class:numeric={col.numeric}
-        title="Sort by {col.label}"
-        onclick={() => sortBy(col.key)}
-      >
-        {col.label}
-        <span class="arrow">{sortIndicator(col.key)}</span>
-      </button>
-    {/each}
-  </div>
+<svelte:window
+  onmousemove={resizing ? onResizeMove : undefined}
+  onmouseup={resizing ? () => (resizing = null) : undefined}
+/>
 
-  <div
-    class="scroller"
-    bind:this={scroller}
-    bind:clientHeight={viewH}
-    onscroll={onScroll}
-    role="grid"
-    tabindex="-1"
-    aria-rowcount={session.total}
-  >
+<div class="list">
+  <div class="hscroll">
+    <div class="inner">
+      <div class="header" style:grid-template-columns={template} role="row">
+        {#each COLUMNS as col (col.key)}
+          <button
+            class="head"
+            class:numeric={col.numeric}
+            title="Sort by {col.label}"
+            onclick={() => sortBy(col.key)}
+          >
+            <span class="head-label">{col.label}</span>
+            {#if session.sortKey === col.key}
+              <Icon name={session.sortAsc ? "caret-up-fill" : "caret-down-fill"} size={10} />
+            {/if}
+            <!-- The grip is mouse-only by design: keyboard users don't
+                 resize columns, they sort via the header button. -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <span
+              class="grip"
+              onmousedown={(e) => startResize(e, col.key)}
+              onclick={(e) => e.stopPropagation()}
+            ></span>
+          </button>
+        {/each}
+        <span></span>
+      </div>
+
+      <div
+        class="scroller"
+        bind:this={scroller}
+        bind:clientHeight={viewH}
+        onscroll={onScroll}
+        role="grid"
+        tabindex="-1"
+        aria-rowcount={session.total}
+      >
     <div class="spacer" style:height="{spacerH}px"></div>
     <div class="layer" style:transform="translateY({drawn.layerY}px)">
       {#each drawn.rows as row, i (drawn.firstRow + i)}
@@ -179,7 +219,7 @@
           class:selected={isSelected(globalRow)}
           class:dimmed={row.is_hidden || row.is_system}
           class:deleted={session.deletedNodes.has(`${row.vol}:${row.id}`)}
-          style:grid-template-columns={GRID}
+          style:grid-template-columns={template}
           style:height="{ROW_H}px"
           role="row"
           tabindex={-1}
@@ -202,10 +242,10 @@
           </span>
           <span class="cell numeric">{formatSize(row.size)}</span>
           <span class="cell numeric">{formatSize(row.allocated)}</span>
-          <span class="cell">{row.extension}</span>
-          <span class="cell">{row.modified_display}</span>
-          <span class="cell">{row.kind_label}</span>
-          <span class="cell path" title={row.dir_path}>{row.dir_path}</span>
+          <span class="cell muted">{row.extension}</span>
+          <span class="cell muted">{row.modified_display}</span>
+          <span class="cell muted">{row.kind_label}</span>
+          <span class="cell muted" title={row.dir_path}>{row.dir_path}</span>
         </div>
       {/each}
     </div>
@@ -219,6 +259,8 @@
         {/if}
       </div>
     {/if}
+      </div>
+    </div>
   </div>
 </div>
 
@@ -233,25 +275,42 @@
     background: var(--surface-sunken);
   }
 
-  .header {
-    display: grid;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-raised);
+  .hscroll {
+    flex: 1;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    display: flex;
+  }
+  .inner {
+    flex: 1;
+    min-width: min-content;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
+  .header {
+    display: grid;
+    align-items: stretch;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-raised);
+    flex: 0 0 auto;
+    user-select: none;
+  }
   .head {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-2);
+    height: 26px;
+    padding: 0 var(--space-2);
     border: none;
     border-right: 1px solid var(--border-subtle);
     background: none;
     color: var(--text-secondary);
     font-family: inherit;
     font-size: var(--font-size-caption);
-    font-weight: var(--font-weight-semibold);
-    text-align: left;
     cursor: pointer;
     overflow: hidden;
     white-space: nowrap;
@@ -263,9 +322,18 @@
   .head.numeric {
     justify-content: flex-end;
   }
-  .arrow {
-    font-size: var(--font-size-caption);
-    color: var(--accent);
+  .head-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .grip {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 2;
   }
 
   .scroller {
@@ -325,6 +393,10 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
+  .cell.muted {
+    color: var(--text-secondary);
+    font-size: var(--font-size-caption);
+  }
   .cell.name {
     display: flex;
     align-items: center;
@@ -333,9 +405,6 @@
   .cell.name .label {
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .cell.path {
-    color: var(--text-secondary);
   }
 
   .badge {

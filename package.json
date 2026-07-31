@@ -12,6 +12,7 @@
     "test": "cd frontend && vitest run",
     "version:check": "node scripts/version.js check",
     "version:sync": "node scripts/version.js sync",
+    "profile:build": "npm run build && cargo build --profile profiling --features tauri/custom-protocol",
     "tauri": "tauri"
   },
   "dependencies": {

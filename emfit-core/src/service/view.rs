@@ -12,6 +12,8 @@
 
 use std::cmp::Ordering;
 
+use rayon::prelude::*;
+
 use crate::model::index::Index;
 use crate::service::filetype::{FileKind, extension_of};
 use crate::service::fold::CaseFold;
@@ -56,19 +58,28 @@ pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
     let node = |hit: &Hit| indices[hit.0 as usize].node(hit.1);
     let name = |hit: &Hit| indices[hit.0 as usize].name(hit.1);
 
+    // Every arm derives its key ONCE per hit (`par_sort_by_cached_key` /
+    // decoration), never per comparison: a comparator that folds or
+    // classifies inline runs n·log n times — ~70M for a 3M-row view, which
+    // profiled as ~9 s of pure sort. Char-wise folded comparison and
+    // comparing pre-folded `String`s order identically (char code-point
+    // order == UTF-8 byte order), and the transient key allocations are the
+    // same accepted tradeoff as the Path decoration below. Rayon spreads
+    // both the key construction and the sort across cores — the string
+    // sorts profiled ~57% in key allocation, ~37% in the sort itself, both
+    // of which parallelize; stability is preserved.
+    let folded = |s: &str| -> String { s.chars().map(|c| fold.fold(c)).collect() };
     match sort.key {
-        SortKey::Name => hits.sort_by(|a, b| fold.cmp(name(a), name(b))),
-        SortKey::Size => hits.sort_by_key(|h| effective_size(indices, *h)),
-        SortKey::Allocated => hits.sort_by_key(|h| effective_allocated(indices, *h)),
-        SortKey::Modified => hits.sort_by_key(|h| node(h).times().mtime),
-        SortKey::Extension => hits.sort_by(|a, b| {
-            fold.cmp(extension_of(name(a)), extension_of(name(b)))
-                .then_with(|| fold.cmp(name(a), name(b)))
-        }),
-        SortKey::Kind => hits.sort_by(|a, b| {
-            let ka = FileKind::classify(name(a), node(a).is_directory());
-            let kb = FileKind::classify(name(b), node(b).is_directory());
-            ka.cmp(&kb).then_with(|| fold.cmp(name(a), name(b)))
+        SortKey::Name => hits.par_sort_by_cached_key(|h| folded(name(h))),
+        SortKey::Size => hits.par_sort_by_cached_key(|h| effective_size(indices, *h)),
+        SortKey::Allocated => hits.par_sort_by_cached_key(|h| effective_allocated(indices, *h)),
+        SortKey::Modified => hits.par_sort_by_cached_key(|h| node(h).times().mtime),
+        SortKey::Extension => {
+            hits.par_sort_by_cached_key(|h| (folded(extension_of(name(h))), folded(name(h))));
+        }
+        SortKey::Kind => hits.par_sort_by_cached_key(|h| {
+            let n = name(h);
+            (FileKind::classify(n, node(h).is_directory()), folded(n))
         }),
         SortKey::Path => {
             // Paths are assembled strings; comparing by walking parents for
@@ -76,10 +87,10 @@ pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
             // instead — the cost is one path string per hit, held only for
             // the duration of the sort.
             let mut decorated: Vec<(String, Hit)> = hits
-                .iter()
+                .par_iter()
                 .map(|&(vol, id)| (indices[vol as usize].path(id), (vol, id)))
                 .collect();
-            decorated.sort_by(|a, b| fold.cmp(&a.0, &b.0));
+            decorated.par_sort_by(|a, b| fold.cmp(&a.0, &b.0));
             for (slot, (_, hit)) in decorated.into_iter().enumerate() {
                 hits[slot] = hit;
             }

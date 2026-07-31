@@ -30,6 +30,7 @@ src-tauri/gen/
 
 # --- App runtime artifacts ---
 /logs/
+profile.*
 
 # --- Secrets (never commit) ---
 .env
