@@ -2,9 +2,11 @@
 //!
 //! Right-click hands the node's path to the real `IContextMenu` — the same
 //! menu Explorer shows, extensions and all — exactly as WizTree does. EmFit
-//! appends exactly one item of its own, **Copy path**, and ships no mutating
-//! entries; delete/rename/move are the shell's verbs and the shell's
-//! business.
+//! appends two items of its own, **Copy path** and (for folders) **Zoom
+//! in**, and ships no mutating entries; delete/rename/move are the shell's
+//! verbs and the shell's business. EmFit actions that touch app state are
+//! returned as a [`MenuAction`] for the caller to apply — this module knows
+//! paths and menus, not nodes and views.
 //!
 //! # Threading & ownership
 //!
@@ -26,20 +28,39 @@
 //! tao, the window is subclassed (`SetWindowSubclass`) for exactly the
 //! lifetime of the menu to forward them.
 
+/// What the user picked from EmFit's own menu items — shell verbs and Copy
+/// path are handled internally and report [`MenuAction::None`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    None,
+    /// Zoom the treemap into this node.
+    ZoomIn,
+}
+
 /// Show the shell context menu for an absolute path at the cursor, owned by
 /// `hwnd` (the app window, as a raw handle so tauri's and our `windows`
-/// crate versions never need to agree on a type). Must be called on the
-/// main thread; blocks it modally while the menu is open, then invokes
-/// whatever verb was chosen.
-pub fn show_at(hwnd: isize, path: &str) {
+/// crate versions never need to agree on a type). The zoom item reads
+/// "Zoom in" for a folder (`is_dir`) and "Zoom in to parent" for a file —
+/// the caller resolves which node actually gets drilled. Must be called on
+/// the main thread; blocks it modally while the menu is open, invokes
+/// whatever shell verb was chosen, and returns the EmFit action for the
+/// caller to apply.
+pub fn show_at(hwnd: isize, path: &str, is_dir: bool) -> MenuAction {
     #[cfg(windows)]
-    if let Err(e) = windows_impl::show(hwnd, path) {
-        tracing::warn!(path, error = %e, "shell context menu failed");
+    {
+        match windows_impl::show(hwnd, path, is_dir) {
+            Ok(action) => action,
+            Err(e) => {
+                tracing::warn!(path, error = %e, "shell context menu failed");
+                MenuAction::None
+            }
+        }
     }
     #[cfg(not(windows))]
     {
-        let _ = hwnd;
+        let _ = (hwnd, is_dir);
         tracing::debug!(path, "shell context menu is Windows-only; ignoring");
+        MenuAction::None
     }
 }
 
@@ -79,6 +100,7 @@ mod windows_impl {
     const ID_SHELL_FIRST: u32 = 1;
     const ID_SHELL_LAST: u32 = 0x6FFF;
     const ID_COPY_PATH: u32 = 0x7001;
+    const ID_ZOOM_IN: u32 = 0x7002;
 
     /// Arbitrary-but-fixed id for our transient window subclass.
     const SUBCLASS_ID: usize = 0x454D46; // "EMF"
@@ -131,7 +153,11 @@ mod windows_impl {
         unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     }
 
-    pub fn show(hwnd: isize, path: &str) -> windows::core::Result<()> {
+    pub fn show(
+        hwnd: isize,
+        path: &str,
+        is_dir: bool,
+    ) -> windows::core::Result<super::MenuAction> {
         let hwnd = HWND(hwnd as *mut core::ffi::c_void);
 
         // The main thread is already an STA (WebView2 requires it); this is
@@ -182,16 +208,27 @@ mod windows_impl {
         }
         ACTIVE.set((icm2, icm3));
 
-        let result = (|| -> windows::core::Result<()> {
+        let result = (|| -> windows::core::Result<super::MenuAction> {
             // SAFETY: fresh empty menu, id range documented at the consts.
             unsafe { menu.QueryContextMenu(hmenu, 0, ID_SHELL_FIRST, ID_SHELL_LAST, CMF_NORMAL) }
                 .ok()?;
 
-            // The one EmFit item. Appended after the shell's, separated.
-            // SAFETY: valid menu handle and static string.
+            // The EmFit items. Appended after the shell's, separated. A
+            // file zooms to its parent directory, and says so.
+            // SAFETY: valid menu handle and static strings.
             unsafe {
                 AppendMenuW(hmenu, MF_SEPARATOR, 0, None)?;
                 AppendMenuW(hmenu, MF_STRING, ID_COPY_PATH as usize, w!("Copy path"))?;
+                AppendMenuW(
+                    hmenu,
+                    MF_STRING,
+                    ID_ZOOM_IN as usize,
+                    if is_dir {
+                        w!("Zoom in")
+                    } else {
+                        w!("Zoom in to parent")
+                    },
+                )?;
             }
 
             let mut pt = POINT::default();
@@ -216,6 +253,9 @@ mod windows_impl {
             match chosen.0 as u32 {
                 0 => {} // dismissed
                 ID_COPY_PATH => copy_to_clipboard(hwnd, &wide)?,
+                // App-state actions are the caller's to apply — this module
+                // knows menus, not views.
+                ID_ZOOM_IN => return Ok(super::MenuAction::ZoomIn),
                 id @ ID_SHELL_FIRST..=ID_SHELL_LAST => {
                     let info = CMINVOKECOMMANDINFO {
                         cbSize: std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32,
@@ -232,7 +272,7 @@ mod windows_impl {
                 }
                 other => tracing::debug!(other, "menu returned an id outside every range"),
             }
-            Ok(())
+            Ok(super::MenuAction::None)
         })();
 
         ACTIVE.set((None, None));

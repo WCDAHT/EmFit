@@ -81,6 +81,11 @@ export const session = $state({
   /** Draw the synthetic free-space block in the treemap (config-persisted;
    *  off by default). */
   showFreeSpace: false,
+  /** Nodes the USN watcher observed deleted since the last scan, as
+   *  `"vol:id"` keys (M5). Marks only — red border in the treemap, flagged
+   *  rows elsewhere — cleared wholesale on any successful scan, because
+   *  rescans can shift volume slots and always restart the watchers. */
+  deletedNodes: new SvelteSet<string>(),
   /** How every byte count renders (config-persisted): "dynamic" picks the
    *  largest unit ≥ 1; anything else is a fixed unit. Consumed exclusively
    *  through `formatSize` in lib/format.ts. */

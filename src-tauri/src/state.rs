@@ -62,6 +62,9 @@ pub struct Inner {
     pub volumes: Vec<ScannedVolume>,
     pub scanning: bool,
     pub scan_cancel: Option<CancellationToken>,
+    /// Cancels the whole USN deletion-watcher fleet (`watch.rs`). Taken and
+    /// cancelled when a scan starts; a fresh fleet spawns when it finishes.
+    pub watch_cancel: Option<CancellationToken>,
     pub view: ViewState,
 }
 

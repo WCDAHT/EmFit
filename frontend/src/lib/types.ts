@@ -126,6 +126,26 @@ export interface SelectionSummaryDto {
   allocated_display: string;
 }
 
+/** Payload of the `usn:deleted` event: nodes newly observed deleted (M5 —
+ *  marks only; every view shows them flagged until the next rescan). */
+export interface UsnDeletedEvent {
+  vol: number;
+  ids: number[];
+}
+
+/** Payload of the `usn:gap` event: the change journal lost history, so the
+ *  deletion marks on this volume are incomplete until a rescan. */
+export interface UsnGapEvent {
+  volume: string;
+}
+
+/** Payload of the `menu:zoom` event: "Zoom in" was picked on a folder in
+ *  the shell context menu — drill the treemap into it. */
+export interface MenuZoomEvent {
+  vol: number;
+  id: number;
+}
+
 /** A `Filters.csv` preset. */
 export interface PresetDto {
   name: string;

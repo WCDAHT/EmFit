@@ -122,6 +122,7 @@
   $effect(() => {
     void session.focus;
     void hover;
+    void session.deletedNodes.size;
     scheduleComposite();
   });
 
@@ -536,6 +537,16 @@
       ctx.lineWidth = width;
       ctx.strokeRect(r.x + 1, r.y + 1, Math.max(0, r.w - 2), Math.max(0, r.h - 2));
     };
+    // M5 deletion marks: red border on every block the USN watcher saw
+    // deleted, until the next rescan. Lives on this cheap layer so a mark
+    // never re-rasterizes the cushion scene.
+    if (session.deletedNodes.size > 0) {
+      const danger = cssVar("--danger");
+      for (const key of session.deletedNodes) {
+        const r = byId.get(key);
+        if (r) outline(r, danger, 2);
+      }
+    }
     if (session.focus) {
       const f = byId.get(`${session.focus.vol}:${session.focus.id}`);
       if (f) outline(f, cssVar("--selection"), 2);

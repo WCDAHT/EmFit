@@ -29,7 +29,14 @@
     clearSelection,
     selectAll,
   } from "./lib/session.svelte";
-  import type { ScanDoneEvent, ScanProgressEvent, ViewUpdatedEvent } from "./lib/types";
+  import type {
+    MenuZoomEvent,
+    ScanDoneEvent,
+    ScanProgressEvent,
+    UsnDeletedEvent,
+    UsnGapEvent,
+    ViewUpdatedEvent,
+  } from "./lib/types";
   import { SIZE_UNITS, formatSize, type SizeUnit } from "./lib/format";
 
   let aboutOpen = $state(false);
@@ -69,9 +76,39 @@
               error: payload.error ?? "failed",
             };
 
+        // A scan REPLACES the volume set, so everything keyed by (vol, id)
+        // is stale: deletion marks, the treemap drill, and the focus.
+        if (payload.ok) {
+          session.deletedNodes.clear();
+          session.drill = null;
+          session.focus = null;
+        }
+
         const anyRunning = Object.values(session.scan).some((s) => s.phase === "scanning");
         if (!anyRunning) session.scanning = false;
         session.volumes = await listVolumes();
+      }),
+
+      // M5 deletion marks: the USN watcher saw these nodes deleted. Marks
+      // are frontend-session state only, sticky until the next rescan.
+      listen<UsnDeletedEvent>("usn:deleted", ({ payload }) => {
+        for (const id of payload.ids) {
+          session.deletedNodes.add(`${payload.vol}:${id}`);
+        }
+      }),
+
+      // "Zoom in" from the shell context menu: drill the treemap into the
+      // folder — switching to the Tree view if the menu came from the list.
+      listen<MenuZoomEvent>("menu:zoom", ({ payload }) => {
+        session.tab = "tree";
+        session.drill = { vol: payload.vol, id: payload.id };
+      }),
+
+      listen<UsnGapEvent>("usn:gap", ({ payload }) => {
+        session.warnings = [
+          ...session.warnings,
+          `Change journal gap on ${payload.volume} — deletion marks are incomplete; rescan to refresh.`,
+        ];
       }),
 
       listen<ViewUpdatedEvent>("view:updated", ({ payload }) => {

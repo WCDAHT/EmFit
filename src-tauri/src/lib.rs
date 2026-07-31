@@ -11,6 +11,7 @@ mod dto;
 mod error;
 mod shell_menu;
 mod state;
+mod watch;
 
 use std::sync::Mutex;
 

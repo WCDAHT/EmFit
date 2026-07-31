@@ -390,6 +390,29 @@ pub struct DrillDto {
     pub id: u32,
 }
 
+/// Payload of the `usn:deleted` event: nodes newly observed deleted
+/// (roadmap M5 — marks only, cleared by the next rescan).
+#[derive(Serialize, Debug, Clone)]
+pub struct UsnDeletedDto {
+    pub vol: u16,
+    pub ids: Vec<u32>,
+}
+
+/// Payload of the `usn:gap` event: the journal lost history; marks on this
+/// volume are incomplete until a rescan.
+#[derive(Serialize, Debug, Clone)]
+pub struct UsnGapDto {
+    pub volume: String,
+}
+
+/// Payload of the `menu:zoom` event: the user picked "Zoom in" on a folder
+/// in the shell context menu — the treemap drills into it.
+#[derive(Serialize, Debug, Clone, Copy)]
+pub struct MenuZoomDto {
+    pub vol: u16,
+    pub id: u32,
+}
+
 /// One extension's share (features.md §4.3).
 #[derive(Serialize, Debug, Clone)]
 pub struct TypeRowDto {

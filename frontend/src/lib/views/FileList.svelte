@@ -178,6 +178,7 @@
           class="row"
           class:selected={isSelected(globalRow)}
           class:dimmed={row.is_hidden || row.is_system}
+          class:deleted={session.deletedNodes.has(`${row.vol}:${row.id}`)}
           style:grid-template-columns={GRID}
           style:height="{ROW_H}px"
           role="row"
@@ -305,6 +306,11 @@
   }
   .row.dimmed .label {
     color: var(--text-secondary);
+  }
+  /* Observed deleted since the scan (M5): flagged, not removed. */
+  .row.deleted .label {
+    color: var(--danger);
+    text-decoration: line-through;
   }
 
   .cell {

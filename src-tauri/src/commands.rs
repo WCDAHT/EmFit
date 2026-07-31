@@ -90,11 +90,18 @@ pub fn start_scan(
         if inner.scanning {
             return Err(CommandError::Shell("a scan is already running".into()));
         }
+        // A scan run REPLACES the result set (user direction 2026-07-31,
+        // WizTree semantics): what you see afterwards is exactly what you
+        // just scanned. Multi-volume views come from selecting several
+        // targets in one run, not from accumulating runs.
+        inner.volumes.clear();
         let cancel = CancellationToken::new();
         inner.scanning = true;
         inner.scan_cancel = Some(cancel.clone());
         cancel
     };
+    // The indexes those watchers map against are gone.
+    crate::watch::stop_all(&state);
 
     std::thread::spawn(move || {
         run_scan_job(&app, &targets, &cancel);
@@ -108,6 +115,9 @@ pub fn start_scan(
         // The result set changed; whatever query is active runs against the
         // new indexes.
         requery(&app, false);
+
+        // Fresh indexes → fresh deletion watchers (roadmap M5).
+        crate::watch::respawn_all(&app);
     });
     Ok(())
 }
@@ -444,7 +454,7 @@ pub fn show_context_menu(
     vol: u16,
     id: u32,
 ) -> CommandResult<()> {
-    let path = {
+    let (path, is_dir, zoom_id) = {
         let inner = state.inner.lock().unwrap();
         let Some(volume) = inner.volumes.get(vol as usize) else {
             return Ok(());
@@ -454,10 +464,18 @@ pub fn show_context_menu(
             return Ok(());
         }
         let node_id = NodeId::new(id);
-        if index.node(node_id).is_synthetic() {
+        let node = index.node(node_id);
+        if node.is_synthetic() {
             return Ok(()); // free space / placeholders: nothing on disk
         }
-        index.path(node_id)
+        // A folder zooms to itself; a file zooms to its parent directory
+        // (and the menu item is labelled accordingly).
+        let zoom_id = if node.is_directory() {
+            id
+        } else {
+            node.parent().get()
+        };
+        (index.path(node_id), node.is_directory(), zoom_id)
     };
     // A bare drive ("C:") parses as drive-relative; the shell needs "C:\".
     let path = if path.ends_with(':') {
@@ -477,12 +495,17 @@ pub fn show_context_menu(
             .hwnd()
             .map_err(|e| CommandError::Shell(format!("window handle: {e}")))?
             .0 as isize;
-        let _ = window.run_on_main_thread(move || crate::shell_menu::show_at(hwnd, &path));
+        let _ = window.run_on_main_thread(move || {
+            let action = crate::shell_menu::show_at(hwnd, &path, is_dir);
+            if action == crate::shell_menu::MenuAction::ZoomIn {
+                let _ = app.emit("menu:zoom", crate::dto::MenuZoomDto { vol, id: zoom_id });
+            }
+        });
     }
     #[cfg(not(windows))]
     {
-        let _ = window;
-        crate::shell_menu::show_at(0, &path);
+        let _ = (window, app, zoom_id);
+        crate::shell_menu::show_at(0, &path, is_dir);
     }
     Ok(())
 }

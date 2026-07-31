@@ -351,6 +351,7 @@
               class="row"
               class:focused
               class:synthetic={row.synthetic}
+              class:deleted={session.deletedNodes.has(keyOf(row))}
               style:height="{ROW_H}px"
               style:grid-template-columns={template}
               role="treeitem"
@@ -528,6 +529,11 @@
   .row.synthetic .name {
     color: var(--text-muted);
     font-style: italic;
+  }
+  /* Observed deleted since the scan (M5): flagged, not removed. */
+  .row.deleted .name {
+    color: var(--danger);
+    text-decoration: line-through;
   }
 
   .cell {

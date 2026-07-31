@@ -19,5 +19,6 @@ pub mod search;
 pub mod task;
 pub mod tree;
 pub mod treemap;
+pub mod usn;
 pub mod view;
 pub mod volume;
