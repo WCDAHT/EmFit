@@ -92,9 +92,14 @@
       // M5 deletion marks: the USN watcher saw these nodes deleted. Marks
       // are frontend-session state only, sticky until the next rescan.
       listen<UsnDeletedEvent>("usn:deleted", ({ payload }) => {
+        console.log(
+          `usn:deleted received — vol ${payload.vol}, ${payload.ids.length} node(s):`,
+          payload.ids.slice(0, 10),
+        );
         for (const id of payload.ids) {
           session.deletedNodes.add(`${payload.vol}:${id}`);
         }
+        console.log(`deletion marks now: ${session.deletedNodes.size}`);
       }),
 
       // "Zoom in" from the shell context menu: drill the treemap into the

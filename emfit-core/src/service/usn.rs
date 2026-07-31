@@ -1,11 +1,16 @@
 //! USN change-journal reader — deletion watching (roadmap M5, rescoped
 //! 2026-07-30).
 //!
-//! The watcher observes exactly one thing: **file deletions**. A deleted
-//! node is *marked*, never removed — no sizes re-roll, creations and
-//! renames are invisible, and a path reappearing does not clear its mark;
-//! only a rescan does. That scope is why the reason mask below is a single
-//! bit.
+//! The watcher observes exactly one thing: **file deletions** — in both
+//! forms. Shift+Del (and emptying the bin) is a true `FILE_DELETE`; plain
+//! Del is NOT a delete at the filesystem level: the shell *renames* the
+//! file into `$Recycle.Bin\<SID>\`, which the journal reports as
+//! `RENAME_NEW_NAME`. The watcher therefore subscribes to both bits and
+//! reports raw events with the post-event parent; the caller classifies a
+//! rename as "recycled" when the new parent is a bin directory, and
+//! ignores every other rename. A deleted node is *marked*, never removed —
+//! no sizes re-roll, creations are invisible, and a path reappearing (or a
+//! restore from the bin) does not clear its mark; only a rescan does.
 //!
 //! [`UsnWatcher::open`] snapshots the journal's current position, so only
 //! deletions from that moment forward are reported (anything between scan
@@ -24,20 +29,39 @@
 
 use crate::error::Result;
 
+/// One journal record the watcher cares about. `reason` carries the raw
+/// bits; `parent_frn` is where the file lives *after* the event — which is
+/// what lets the caller tell a Recycle-Bin move (parent = a bin directory)
+/// from an ordinary rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UsnEvent {
+    pub frn: u64,
+    pub parent_frn: u64,
+    pub reason: u32,
+}
+
 /// What one poll of the journal produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsnPoll {
-    /// File reference numbers whose records carried `USN_REASON_FILE_DELETE`
-    /// since the last poll. Often empty.
-    Deletions(Vec<u64>),
+    /// Records since the last poll matching the watch mask: true deletes
+    /// and renames (the caller classifies recycles). Often empty.
+    Events(Vec<UsnEvent>),
     /// The journal wrapped, was deleted, or changed identity: events were
     /// lost and the marks can no longer be trusted complete. The watcher is
     /// done; only a rescan re-establishes truth.
     Gap,
 }
 
-/// `USN_REASON_FILE_DELETE` — the single reason bit this milestone watches.
-const REASON_FILE_DELETE: u32 = 0x0000_0200;
+/// `USN_REASON_FILE_DELETE`: the file truly ceased to exist (Shift+Del,
+/// emptied bin, direct deletion).
+pub const REASON_FILE_DELETE: u32 = 0x0000_0200;
+/// `USN_REASON_RENAME_NEW_NAME`: the file got a new name/location. Plain
+/// Del is THIS, not a delete — the shell "deletes" to the bin by renaming
+/// into `$Recycle.Bin\<SID>\`, so recycle detection lives on this bit.
+pub const REASON_RENAME_NEW_NAME: u32 = 0x0000_2000;
+
+/// The bits the watcher subscribes to.
+const REASON_MASK: u32 = REASON_FILE_DELETE | REASON_RENAME_NEW_NAME;
 
 /// One volume's deletion watcher. Construct with [`UsnWatcher::open`], then
 /// [`UsnWatcher::poll`] on a cadence until `Gap` or cancellation.
@@ -80,14 +104,15 @@ impl UsnWatcher {
 
 /// Parse one `FSCTL_READ_USN_JOURNAL` output buffer: a leading next-USN
 /// `i64`, then a run of `USN_RECORD_V2`. Returns the next USN (None when
-/// the buffer held no header) and the FRNs of records carrying any
-/// `reason_mask` bit.
+/// the buffer held no header) and the events carrying any `reason_mask`
+/// bit.
 ///
 /// Pure, so the record walk is testable on every platform. V2 layout:
 /// `RecordLength: u32 @0`, `MajorVersion: u16 @4`, `FileReferenceNumber:
-/// u64 @8`, `Reason: u32 @40`. Records from NTFS via the V0 read struct
-/// are always V2; anything else is skipped by length.
-fn parse_deletions(buf: &[u8], reason_mask: u32) -> (Option<i64>, Vec<u64>) {
+/// u64 @8`, `ParentFileReferenceNumber: u64 @16`, `Reason: u32 @40`.
+/// Records from NTFS via the V0 read struct are always V2; anything else
+/// is skipped by length.
+fn parse_events(buf: &[u8], reason_mask: u32) -> (Option<i64>, Vec<UsnEvent>) {
     const HEADER: usize = 8;
     const RECORD_MIN: usize = 60; // sizeof(USN_RECORD_V2) before the name
 
@@ -107,10 +132,16 @@ fn parse_deletions(buf: &[u8], reason_mask: u32) -> (Option<i64>, Vec<u64>) {
         if major == 2 {
             let frn =
                 u64::from_le_bytes(buf[at + 8..at + 16].try_into().expect("8-byte slice"));
+            let parent_frn =
+                u64::from_le_bytes(buf[at + 16..at + 24].try_into().expect("8-byte slice"));
             let reason =
                 u32::from_le_bytes(buf[at + 40..at + 44].try_into().expect("4-byte slice"));
             if reason & reason_mask != 0 {
-                out.push(frn);
+                out.push(UsnEvent {
+                    frn,
+                    parent_frn,
+                    reason,
+                });
             }
         }
         at += len;
@@ -137,7 +168,7 @@ mod windows_impl {
     };
     use windows::core::PCWSTR;
 
-    use super::{REASON_FILE_DELETE, UsnPoll, parse_deletions};
+    use super::{REASON_MASK, UsnPoll, parse_events};
     use crate::error::{Error, Result};
 
     /// Journal-loss codes that mean "gap", not "failure":
@@ -219,6 +250,13 @@ mod windows_impl {
                 return Err(e);
             }
 
+            tracing::info!(
+                drive = %drive_letter,
+                journal_id = format_args!("{:#x}", data.UsnJournalID),
+                first_usn = data.FirstUsn,
+                next_usn = data.NextUsn,
+                "usn: journal opened, starting at the current tail"
+            );
             Ok(Self {
                 handle,
                 journal_id: data.UsnJournalID,
@@ -228,11 +266,11 @@ mod windows_impl {
         }
 
         pub fn poll(&mut self) -> Result<UsnPoll> {
-            let mut deleted = Vec::new();
+            let mut events = Vec::new();
             for _ in 0..MAX_READS_PER_POLL {
                 let read = READ_USN_JOURNAL_DATA_V0 {
                     StartUsn: self.next_usn,
-                    ReasonMask: REASON_FILE_DELETE,
+                    ReasonMask: REASON_MASK,
                     ReturnOnlyOnClose: 0,
                     Timeout: 0,
                     BytesToWaitFor: 0,
@@ -259,25 +297,35 @@ mod windows_impl {
                         break; // nothing new yet
                     }
                     if GAP_CODES.contains(&code) {
+                        tracing::warn!(code, "usn: journal gap signalled by read");
                         return Ok(UsnPoll::Gap);
                     }
+                    tracing::warn!(code, "usn: read failed");
                     return Err(api_error("FSCTL_READ_USN_JOURNAL"));
                 }
 
-                let (next, frns) =
-                    parse_deletions(&self.buf[..bytes as usize], REASON_FILE_DELETE);
+                let (next, matched) = parse_events(&self.buf[..bytes as usize], REASON_MASK);
+                if bytes > 8 {
+                    tracing::debug!(
+                        bytes,
+                        matched = matched.len(),
+                        start_usn = self.next_usn,
+                        next_usn = next,
+                        "usn: read returned records"
+                    );
+                }
                 let Some(next) = next else {
                     break; // header-less response: no data
                 };
                 let drained = bytes as usize <= 8;
                 let stalled = next == self.next_usn;
                 self.next_usn = next;
-                deleted.extend(frns);
+                events.extend(matched);
                 if drained || stalled {
                     break;
                 }
             }
-            Ok(UsnPoll::Deletions(deleted))
+            Ok(UsnPoll::Events(events))
         }
     }
 }
@@ -286,54 +334,84 @@ mod windows_impl {
 mod tests {
     use super::*;
 
-    /// Append one USN_RECORD_V2 with the given FRN and reason.
-    fn push_record(buf: &mut Vec<u8>, frn: u64, reason: u32, len: usize) {
+    /// Append one USN_RECORD_V2 with the given FRN, parent, and reason.
+    fn push_record(buf: &mut Vec<u8>, frn: u64, parent: u64, reason: u32, len: usize) {
         let start = buf.len();
         buf.resize(start + len, 0);
         buf[start..start + 4].copy_from_slice(&(len as u32).to_le_bytes());
         buf[start + 4..start + 6].copy_from_slice(&2u16.to_le_bytes()); // major
         buf[start + 8..start + 16].copy_from_slice(&frn.to_le_bytes());
+        buf[start + 16..start + 24].copy_from_slice(&parent.to_le_bytes());
         buf[start + 40..start + 44].copy_from_slice(&reason.to_le_bytes());
     }
 
     #[test]
     fn parses_header_and_matching_records() {
         let mut buf = 42i64.to_le_bytes().to_vec();
-        push_record(&mut buf, 100, REASON_FILE_DELETE, 64);
-        push_record(&mut buf, 200, 0x0000_0001, 72); // data-overwrite: ignored
-        push_record(&mut buf, 300, REASON_FILE_DELETE | 0x8000_0000, 60);
+        push_record(&mut buf, 100, 5, REASON_FILE_DELETE, 64);
+        push_record(&mut buf, 200, 5, 0x0000_0001, 72); // data-overwrite: ignored
+        push_record(&mut buf, 300, 7, REASON_FILE_DELETE | 0x8000_0000, 60);
 
-        let (next, frns) = parse_deletions(&buf, REASON_FILE_DELETE);
+        let (next, events) = parse_events(&buf, REASON_MASK);
         assert_eq!(next, Some(42));
-        assert_eq!(frns, vec![100, 300]);
+        assert_eq!(
+            events,
+            vec![
+                UsnEvent {
+                    frn: 100,
+                    parent_frn: 5,
+                    reason: REASON_FILE_DELETE
+                },
+                UsnEvent {
+                    frn: 300,
+                    parent_frn: 7,
+                    reason: REASON_FILE_DELETE | 0x8000_0000
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn renames_carry_their_new_parent() {
+        // A recycle is a rename whose new parent is the bin — the parent is
+        // exactly what the caller classifies on.
+        let mut buf = 9i64.to_le_bytes().to_vec();
+        push_record(&mut buf, 555, 0xBEEF, REASON_RENAME_NEW_NAME, 60);
+
+        let (_, events) = parse_events(&buf, REASON_MASK);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].frn, 555);
+        assert_eq!(events[0].parent_frn, 0xBEEF);
+        assert_eq!(events[0].reason, REASON_RENAME_NEW_NAME);
     }
 
     #[test]
     fn empty_and_headerless_buffers_yield_nothing() {
-        assert_eq!(parse_deletions(&[], REASON_FILE_DELETE), (None, Vec::new()));
-        let (next, frns) = parse_deletions(&7i64.to_le_bytes(), REASON_FILE_DELETE);
+        assert_eq!(parse_events(&[], REASON_MASK), (None, Vec::new()));
+        let (next, events) = parse_events(&7i64.to_le_bytes(), REASON_MASK);
         assert_eq!(next, Some(7));
-        assert!(frns.is_empty());
+        assert!(events.is_empty());
     }
 
     #[test]
     fn corrupt_lengths_stop_the_walk_instead_of_panicking() {
         let mut buf = 1i64.to_le_bytes().to_vec();
-        push_record(&mut buf, 100, REASON_FILE_DELETE, 64);
+        push_record(&mut buf, 100, 5, REASON_FILE_DELETE, 64);
         // A record claiming to run past the buffer.
         let start = buf.len();
         buf.resize(start + 60, 0);
         buf[start..start + 4].copy_from_slice(&10_000u32.to_le_bytes());
         buf[start + 4..start + 6].copy_from_slice(&2u16.to_le_bytes());
 
-        let (_, frns) = parse_deletions(&buf, REASON_FILE_DELETE);
-        assert_eq!(frns, vec![100], "the valid prefix still parses");
+        let (_, events) = parse_events(&buf, REASON_MASK);
+        assert_eq!(events.len(), 1, "the valid prefix still parses");
+        assert_eq!(events[0].frn, 100);
 
         // Zero-length record: must not loop forever.
         let mut buf = 1i64.to_le_bytes().to_vec();
         buf.resize(8 + 60, 0);
-        let (_, frns) = parse_deletions(&buf, REASON_FILE_DELETE);
-        assert!(frns.is_empty());
+        let (_, events) = parse_events(&buf, REASON_MASK);
+        assert!(events.is_empty());
     }
 
     #[test]
@@ -346,9 +424,10 @@ mod tests {
         buf[start + 4..start + 6].copy_from_slice(&4u16.to_le_bytes());
         buf[start + 8..start + 16].copy_from_slice(&900u64.to_le_bytes());
         buf[start + 40..start + 44].copy_from_slice(&REASON_FILE_DELETE.to_le_bytes());
-        push_record(&mut buf, 901, REASON_FILE_DELETE, 60);
+        push_record(&mut buf, 901, 5, REASON_FILE_DELETE, 60);
 
-        let (_, frns) = parse_deletions(&buf, REASON_FILE_DELETE);
-        assert_eq!(frns, vec![901]);
+        let (_, events) = parse_events(&buf, REASON_MASK);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].frn, 901);
     }
 }
