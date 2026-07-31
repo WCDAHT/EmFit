@@ -90,6 +90,9 @@ export const session = $state({
    *  largest unit ≥ 1; anything else is a fixed unit. Consumed exclusively
    *  through `formatSize` in lib/format.ts. */
   sizeUnit: "dynamic" as import("./format").SizeUnit,
+  /** Bumped by `theme.ts` when the theme actually changes — the repaint
+   *  signal for canvas surfaces, which resolve CSS variables themselves. */
+  themeEpoch: 0,
   /** Fixed height of the treemap row, set by the splitter on drag release;
    *  null = the default flex split. */
   treemapHeight: null as number | null,

@@ -6,6 +6,7 @@
 //! (features.md §9); it lives in this struct behind an `Arc`, shared with the
 //! search worker threads.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use emfit_core::model::index::Index;
@@ -13,7 +14,7 @@ use emfit_core::service::fold::CaseFold;
 use emfit_core::service::query::RawQuery;
 use emfit_core::service::search::Hit;
 use emfit_core::service::task::CancellationToken;
-use emfit_core::service::view::Sort;
+use emfit_core::service::view::{Sort, SortKey, SortRanks};
 
 /// One volume the app has an index for.
 pub struct ScannedVolume {
@@ -66,6 +67,14 @@ pub struct Inner {
     /// cancelled when a scan starts; a fresh fleet spawns when it finishes.
     pub watch_cancel: Option<CancellationToken>,
     pub view: ViewState,
+    /// Precomputed per-column orderings (Everything's "fast sort"): sorting
+    /// with a cached entry is integer-key work instead of a comparison
+    /// sort. Filled by the post-scan warmer; cleared when a scan replaces
+    /// the volume set. ~13MB per column per 3M nodes.
+    pub sort_ranks: HashMap<SortKey, Arc<SortRanks>>,
+    /// Bumped whenever `volumes`/`sort_ranks` are invalidated, so warmers
+    /// that started against an older volume set never install stale ranks.
+    pub ranks_epoch: u64,
 }
 
 pub struct AppState {

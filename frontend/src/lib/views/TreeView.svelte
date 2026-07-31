@@ -35,6 +35,23 @@
   let ghostY = $state(0);
   let bottomEl: HTMLDivElement | undefined = $state();
 
+  /** Space the rest of the view keeps at minimum — controls, a usable
+   *  slice of the folder tree, status bar. Must match the drag clamp. */
+  const RESERVED_ABOVE = 240;
+  const MIN_MAP_H = 140;
+
+  let innerH = $state(typeof window === "undefined" ? 800 : window.innerHeight);
+
+  /** The splitter stores the DESIRED height; what renders is re-clamped
+   *  against the live window height, so shrinking the window can never let
+   *  the map swallow the folder tree — and growing it back restores the
+   *  user's chosen height untouched. */
+  const mapHeight = $derived(
+    session.treemapHeight === null
+      ? null
+      : Math.max(MIN_MAP_H, Math.min(session.treemapHeight, innerH - RESERVED_ABOVE)),
+  );
+
   function startDrag(e: MouseEvent) {
     e.preventDefault();
     dragging = true;
@@ -52,11 +69,15 @@
     if (!bottom) return;
     // New treemap-row height = distance from the release point to its bottom.
     const height = Math.round(bottom.bottom - e.clientY);
-    session.treemapHeight = Math.max(140, Math.min(height, window.innerHeight - 240));
+    session.treemapHeight = Math.max(
+      MIN_MAP_H,
+      Math.min(height, window.innerHeight - RESERVED_ABOVE),
+    );
   }
 </script>
 
 <svelte:window
+  bind:innerHeight={innerH}
   onmousemove={dragging ? onDragMove : undefined}
   onmouseup={dragging ? onDragEnd : undefined}
 />
@@ -86,8 +107,8 @@
 <div
   class="bottom"
   bind:this={bottomEl}
-  style:flex={session.treemapHeight === null ? "1.2 1 0" : "0 0 auto"}
-  style:height={session.treemapHeight === null ? undefined : `${session.treemapHeight}px`}
+  style:flex={mapHeight === null ? "1.2 1 0" : "0 0 auto"}
+  style:height={mapHeight === null ? undefined : `${mapHeight}px`}
 >
   <Treemap />
   {#if SHOW_TYPES_PANEL}

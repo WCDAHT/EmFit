@@ -894,6 +894,7 @@ version = "0.1.0"
 dependencies = [
  "directories",
  "emfit-core",
+ "rayon",
  "serde",
  "serde_json",
  "tauri",

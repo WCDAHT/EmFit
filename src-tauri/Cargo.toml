@@ -32,6 +32,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 directories = { workspace = true }
+# A dedicated small thread pool for the sort-rank warmer, so its heavy
+# background sorts never contend with interactive sorts on rayon's global
+# pool (a warm-up build was observed stretching a 20 ms rank sort to ~1 s).
+rayon = { workspace = true }
 
 # The native shell context menu (`shell_menu`): IContextMenu hosting.
 # Windows-only, like the core's volume/elevation modules.

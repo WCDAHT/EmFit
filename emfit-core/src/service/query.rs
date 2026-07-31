@@ -249,8 +249,13 @@ fn extract_scope(text: &str, q: &mut Query) -> String {
 }
 
 /// Case-insensitive operator prefix match (`EXT:` works too).
+///
+/// Compared as BYTES, not a `str` slice: `token[..op.len()]` panics when a
+/// multi-byte character straddles the cut (searching for `пр` took down the
+/// search worker this way). Operators are pure ASCII, so a byte match also
+/// guarantees the split point is a char boundary.
 fn strip_operator<'a>(token: &'a str, op: &str) -> Option<&'a str> {
-    (token.len() >= op.len() && token[..op.len()].eq_ignore_ascii_case(op))
+    (token.len() >= op.len() && token.as_bytes()[..op.len()].eq_ignore_ascii_case(op.as_bytes()))
         .then(|| &token[op.len()..])
 }
 
@@ -392,6 +397,22 @@ mod tests {
         assert_eq!(q.patterns, vec![Pattern::Substring("report".to_string())]);
         assert!(q.warnings.is_empty());
         assert!(!q.is_match_all());
+    }
+
+    #[test]
+    fn non_ascii_tokens_parse_without_panicking() {
+        // Regression: the operator-prefix check sliced `token[..op.len()]`,
+        // which panics when the cut lands inside a multi-byte char — every
+        // Cyrillic keystroke killed the search worker.
+        for text in ["пр", "при", "привет", "日本語", "é", "пр ext:pdf"] {
+            let q = parse_text(text);
+            assert!(
+                !q.patterns.is_empty(),
+                "`{text}` should produce a pattern"
+            );
+        }
+        let q = parse_text("пр ext:pdf");
+        assert_eq!(q.extensions, vec!["pdf".to_string()]);
     }
 
     #[test]

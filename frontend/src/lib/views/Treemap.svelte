@@ -119,6 +119,7 @@
     void session.colorMode;
     void session.typeFilter.size;
     void session.sizeUnit;
+    void session.themeEpoch; // the scene bakes CSS variables into pixels
     void rects;
     void extRows;
     scheduleScene();
@@ -141,6 +142,7 @@
     void session.focus;
     void hover;
     void session.deletedNodes.size;
+    void session.themeEpoch; // outline colors are CSS variables too
     scheduleComposite();
   });
 

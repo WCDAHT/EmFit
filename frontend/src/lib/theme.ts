@@ -13,6 +13,7 @@
 //! then reconcile with the backend on startup.
 
 import { getConfig, setConfig } from "./ipc";
+import { session } from "./session.svelte";
 
 export type ThemeMode = "dark" | "light";
 
@@ -28,10 +29,16 @@ function preferredMode(): ThemeMode {
 }
 
 /** Apply `mode` to the document and update the first-paint cache. Does not
- *  touch the backend â€” use {@link saveThemeMode} to persist a user choice. */
+ *  touch the backend â€” use {@link saveThemeMode} to persist a user choice.
+ *
+ *  Bumps `session.themeEpoch` on a real change: DOM elements restyle
+ *  through CSS alone, but canvas surfaces (the treemap scene) resolved
+ *  their CSS variables at paint time and must be told to repaint. */
 export function setThemeMode(mode: ThemeMode): void {
+  const changed = document.documentElement.getAttribute("data-theme") !== mode;
   document.documentElement.setAttribute("data-theme", mode);
   localStorage.setItem(STORAGE_KEY, mode);
+  if (changed) session.themeEpoch += 1;
 }
 
 /** Current mode as reflected on the document. */

@@ -155,6 +155,24 @@
     scrollTop = scroller?.scrollTop ?? 0;
   }
 
+  /** Split a name into plain/bold segments along the match ranges (UTF-16
+   *  offsets straight from Rust, so `slice` needs no conversion). */
+  function segments(
+    name: string,
+    ranges: [number, number][],
+  ): { text: string; hit: boolean }[] {
+    if (ranges.length === 0) return [{ text: name, hit: false }];
+    const out: { text: string; hit: boolean }[] = [];
+    let at = 0;
+    for (const [start, end] of ranges) {
+      if (start > at) out.push({ text: name.slice(at, start), hit: false });
+      out.push({ text: name.slice(start, end), hit: true });
+      at = end;
+    }
+    if (at < name.length) out.push({ text: name.slice(at), hit: false });
+    return out;
+  }
+
   function onRowClick(e: MouseEvent, globalRow: number) {
     if (e.shiftKey) {
       selectRange(globalRow);
@@ -235,7 +253,11 @@
               name={KIND_ICONS[row.kind_label] ?? "file-earmark"}
               color={row.category > 0 ? `var(--category-${row.category})` : "var(--text-muted)"}
             />
-            <span class="label">{row.name}</span>
+            <span class="label"
+              >{#each segments(row.name, row.match_ranges) as seg, i (i)}{#if seg.hit}<b
+                    class="match">{seg.text}</b
+                  >{:else}{seg.text}{/if}{/each}</span
+            >
             {#if row.is_alias}<span class="badge" title="Hard link — bytes counted under another name">link</span>{/if}
             {#if row.is_synthetic}<span class="badge" title="Not a file on the volume">virtual</span>{/if}
             {#if row.is_reparse}<span class="badge" title="Reparse point / junction — not followed">junction</span>{/if}
@@ -405,6 +427,10 @@
   .cell.name .label {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* The spans of the name the query matched. */
+  .label .match {
+    font-weight: var(--font-weight-bold, 700);
   }
 
   .badge {

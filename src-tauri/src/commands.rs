@@ -93,8 +93,11 @@ pub fn start_scan(
         // A scan run REPLACES the result set (user direction 2026-07-31,
         // WizTree semantics): what you see afterwards is exactly what you
         // just scanned. Multi-volume views come from selecting several
-        // targets in one run, not from accumulating runs.
+        // targets in one run, not from accumulating runs. The sort-rank
+        // cache indexes into these volumes, so it dies with them.
         inner.volumes.clear();
+        inner.sort_ranks.clear();
+        inner.ranks_epoch += 1;
         let cancel = CancellationToken::new();
         inner.scanning = true;
         inner.scan_cancel = Some(cancel.clone());
@@ -118,8 +121,86 @@ pub fn start_scan(
 
         // Fresh indexes → fresh deletion watchers (roadmap M5).
         crate::watch::respawn_all(&app);
+
+        // Everything-style fast sort: precompute every column's ordering in
+        // the background so header clicks are integer-rank sorts.
+        warm_sort_ranks(&app);
     });
     Ok(())
+}
+
+/// Build the per-column sort-rank tables on a background thread, one column
+/// at a time, aborting the moment a new scan invalidates the volume set.
+/// Order matters: the default sort first, then the columns whose uncached
+/// sorts are the most expensive (the string-keyed ones).
+fn warm_sort_ranks(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let (volumes, epoch) = {
+        let inner = state.inner.lock().unwrap();
+        let volumes: Vec<Arc<emfit_core::model::index::Index>> =
+            inner.volumes.iter().map(|v| v.index.clone()).collect();
+        (volumes, inner.ranks_epoch)
+    };
+    if volumes.is_empty() {
+        return;
+    }
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        use emfit_core::service::view::SortKey as K;
+
+        // Rayon's pool is process-global; building ranks on it starved
+        // interactive sorts (a 20 ms rank sort stretched to ~1 s while the
+        // Path table was building). A quarter of the cores in a private
+        // pool keeps warm-up slightly slower and the UI unaffected.
+        let threads = std::thread::available_parallelism()
+            .map(|n| (n.get() / 4).max(1))
+            .unwrap_or(1);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .thread_name(|i| format!("rank-warm-{i}"))
+            .build();
+
+        for key in [
+            K::Size,
+            K::Name,
+            K::Path,
+            K::Extension,
+            K::Kind,
+            K::Allocated,
+            K::Modified,
+        ] {
+            {
+                let state = app.state::<AppState>();
+                let inner = state.inner.lock().unwrap();
+                if inner.ranks_epoch != epoch {
+                    return; // a new scan owns the volumes now
+                }
+                if inner.sort_ranks.contains_key(&key) {
+                    continue;
+                }
+            }
+            let started = Instant::now();
+            let refs: Vec<&emfit_core::model::index::Index> =
+                volumes.iter().map(|v| v.as_ref()).collect();
+            let ranks = Arc::new(match &pool {
+                Ok(pool) => pool.install(|| view::build_ranks(&refs, key)),
+                Err(_) => view::build_ranks(&refs, key),
+            });
+
+            let state = app.state::<AppState>();
+            let mut inner = state.inner.lock().unwrap();
+            if inner.ranks_epoch != epoch {
+                return;
+            }
+            inner.sort_ranks.insert(key, ranks);
+            tracing::info!(
+                ?key,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "sort ranks warmed"
+            );
+        }
+    });
 }
 
 /// The blocking part of a scan, on its worker thread.
@@ -292,10 +373,28 @@ pub fn get_rows(state: State<'_, AppState>, offset: u64, count: u64) -> RowWindo
     let indices: Vec<&emfit_core::model::index::Index> =
         inner.volumes.iter().map(|v| v.index.as_ref()).collect();
 
+    // Match-highlighting spans, computed only for this visible window with
+    // the same folding/needle semantics the matcher used.
+    let query = Query::parse(&inner.view.raw);
+    let highlightable =
+        !query.patterns.is_empty() || query.regex.is_some() || !query.extensions.is_empty();
+
     let count = count.min(MAX_WINDOW) as usize;
     let rows = view::build_rows(&indices, &inner.view.hits, offset as usize, count)
         .into_iter()
-        .map(Into::into)
+        .map(|row| {
+            let mut dto: crate::dto::RowDto = row.into();
+            if highlightable {
+                let volume = &inner.volumes[dto.vol as usize];
+                dto.match_ranges = search::highlight_ranges(
+                    &dto.name,
+                    &volume.fold,
+                    volume.index.caps().case_sensitive,
+                    &query,
+                );
+            }
+            dto
+        })
         .collect();
 
     RowWindowDto {
@@ -536,6 +635,7 @@ fn requery(app: &AppHandle, sort_only: bool) {
 
     let raw = inner.view.raw.clone();
     let sort = inner.view.sort;
+    let cached_ranks = inner.sort_ranks.get(&sort.key).cloned();
     let volumes: Vec<(
         Arc<emfit_core::model::index::Index>,
         emfit_core::service::fold::CaseFold,
@@ -572,7 +672,18 @@ fn requery(app: &AppHandle, sort_only: bool) {
         let sort_started = Instant::now();
         let indices: Vec<&emfit_core::model::index::Index> =
             volumes.iter().map(|(index, _)| index.as_ref()).collect();
-        view::sort_hits(&indices, &mut hits, sort);
+        // Fast path: a warmed rank table turns the sort into integer-key
+        // work; the comparison sort only runs before the warmer gets there.
+        let ranked = match &cached_ranks {
+            Some(ranks) => {
+                view::sort_by_ranks(&mut hits, ranks, sort.ascending);
+                true
+            }
+            None => {
+                view::sort_hits(&indices, &mut hits, sort);
+                false
+            }
+        };
 
         // Per-stage timing in the log: the first place to look when a query
         // feels slow (the UI's elapsed number is the whole pipeline).
@@ -580,6 +691,7 @@ fn requery(app: &AppHandle, sort_only: bool) {
             hits = hits.len(),
             search_ms,
             sort_ms = sort_started.elapsed().as_millis() as u64,
+            ranked,
             sort_only,
             "view pipeline timings"
         );

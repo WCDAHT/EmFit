@@ -20,7 +20,7 @@ use crate::service::fold::CaseFold;
 use crate::service::search::Hit;
 
 /// Which column orders the view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SortKey {
     Name,
     Path,
@@ -98,6 +98,51 @@ pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
     }
 
     if !sort.ascending {
+        hits.reverse();
+    }
+}
+
+/// One column's precomputed total ordering across the whole volume set:
+/// `ranks[vol][node_id] = position of that node in the column's ascending
+/// global order`. Everything's "fast sort" trick: the index is immutable
+/// between scans, so each column's order can be computed ONCE — after
+/// which sorting any hit subset, filtered or not, is integer-key work
+/// ([`sort_by_ranks`]), never string folding or node chasing.
+pub type SortRanks = Vec<std::sync::Arc<[u32]>>;
+
+/// Build the rank table for one column. Costs one full sort of every node
+/// (the same work one uncached sort of a match-all view does) — intended to
+/// run once per scan per column, off the query path.
+pub fn build_ranks(indices: &[&Index], key: SortKey) -> SortRanks {
+    let mut all: Vec<Hit> = indices
+        .iter()
+        .enumerate()
+        .flat_map(|(vol, index)| index.ids().map(move |id| (vol as u16, id)))
+        .collect();
+    sort_hits(
+        indices,
+        &mut all,
+        Sort {
+            key,
+            ascending: true,
+        },
+    );
+    let mut ranks: Vec<Vec<u32>> = indices.iter().map(|index| vec![0; index.len()]).collect();
+    for (position, &(vol, id)) in all.iter().enumerate() {
+        ranks[vol as usize][id.get() as usize] = position as u32;
+    }
+    ranks
+        .into_iter()
+        .map(|r| std::sync::Arc::from(r.into_boxed_slice()))
+        .collect()
+}
+
+/// Order hits by a precomputed rank table — the fast path for every sort
+/// after the first. Unstable is safe: ranks are a permutation, so keys are
+/// unique and there are no equal elements to keep stable.
+pub fn sort_by_ranks(hits: &mut [Hit], ranks: &SortRanks, ascending: bool) {
+    hits.par_sort_unstable_by_key(|&(vol, id)| ranks[vol as usize][id.get() as usize]);
+    if !ascending {
         hits.reverse();
     }
 }
@@ -305,6 +350,33 @@ mod tests {
             .filter(|&id| !index.name(id).is_empty())
             .map(|id| (0u16, id))
             .collect()
+    }
+
+    #[test]
+    fn ranked_sort_orders_exactly_like_the_direct_sort() {
+        let index = index();
+        let indices = [&index];
+        for key in [
+            SortKey::Name,
+            SortKey::Size,
+            SortKey::Allocated,
+            SortKey::Modified,
+            SortKey::Extension,
+            SortKey::Kind,
+            SortKey::Path,
+        ] {
+            for ascending in [true, false] {
+                let sort = Sort { key, ascending };
+                let mut direct = hits(&index);
+                sort_hits(&indices, &mut direct, sort);
+
+                let ranks = build_ranks(&indices, key);
+                let mut ranked = hits(&index);
+                sort_by_ranks(&mut ranked, &ranks, ascending);
+
+                assert_eq!(ranked, direct, "key {key:?} ascending {ascending}");
+            }
+        }
     }
 
     fn names(index: &Index, hits: &[Hit]) -> Vec<String> {

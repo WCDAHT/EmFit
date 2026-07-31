@@ -198,6 +198,9 @@ pub struct RowDto {
     pub is_alias: bool,
     pub is_synthetic: bool,
     pub is_reparse: bool,
+    /// UTF-16 spans of `name` the query matched — the list bolds them.
+    /// Filled by `get_rows` for the visible window; empty on a blank query.
+    pub match_ranges: Vec<(u32, u32)>,
 }
 
 impl From<Row> for RowDto {
@@ -221,6 +224,7 @@ impl From<Row> for RowDto {
             is_alias: row.is_alias,
             is_synthetic: row.is_synthetic,
             is_reparse: row.is_reparse,
+            match_ranges: Vec::new(),
         }
     }
 }

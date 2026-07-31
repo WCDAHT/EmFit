@@ -97,6 +97,8 @@ export interface RowDto {
   is_alias: boolean;
   is_synthetic: boolean;
   is_reparse: boolean;
+  /** UTF-16 spans of `name` the query matched (merged, in order) — bolded. */
+  match_ranges: [number, number][];
 }
 
 /** One window of the current view. */
