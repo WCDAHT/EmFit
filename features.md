@@ -118,7 +118,7 @@ the UI must not imply otherwise.
 ## 1.6 Persistence
 
 - `[new]` **Save and load a scan.** WizTree writes a scan file you can reopen without rescanning (and share). Serialize the flat index + arena; it is nearly a straight memory dump. Also enables opening a scan taken on another machine - directly useful for forensic work.
-- `[new]` **Cache the last scan per volume** and reload it at startup so the window is never empty, with the volume serial + timestamp recorded so a stale cache is obvious and a rescan is one key away.
+- `[done]` **Cache the last scan per volume**, keyed by a fingerprint of the volume's serial, size and cluster size, with the USN journal replayed onto it so scanning that volume again re-reads only the records that changed ([caching.md](./caching.md)). Consulted when the user scans, **not** at startup: nothing appears in the window unasked. The status line says which route a scan took and how old the snapshot was.
 
 ## 1.7 Performance targets and instrumentation
 

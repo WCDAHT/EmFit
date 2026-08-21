@@ -27,6 +27,20 @@ use crate::service::task::CancellationToken;
 /// real directory on the volume.
 pub const ORPHAN_FOLDER_NAME: &str = "[Unreachable]";
 
+/// Ids reserved for the nodes the builder invents.
+///
+/// They sit above [`FS_OBJECT_MASK`](crate::model::index::FS_OBJECT_MASK) and
+/// above any id a scanner can mint (the
+/// hard-link discriminator would need a record number of `0xFFFF_FFFF_FFFC`
+/// and a 65535th link to reach them), so a snapshot can push a synthetic node
+/// back through this builder like any other entry and get the same tree
+/// (`caching.md` sec 5). `u64::MAX` is spoken for by the free-space row
+/// ([`crate::service::scan::FREE_SPACE_FS_ID`]), which is synthetic but is a
+/// real entry a scan produced rather than one this builder invented.
+pub const SYNTHETIC_ROOT_FS_ID: u64 = u64::MAX - 1;
+/// Id of the folder that collects unrooted entries. See [`ORPHAN_FOLDER_NAME`].
+pub const ORPHAN_FS_ID: u64 = u64::MAX - 2;
+
 /// Maps a filesystem's own ids onto [`NodeId`]s during the build.
 ///
 /// Dense when ids are small and contiguous - NTFS record numbers and ext4
@@ -101,7 +115,7 @@ pub struct IndexBuilder {
     // become the Index
     nodes: Vec<Node>,
     arena: String,
-    native_ids: Vec<u64>,
+    fs_ids: Vec<u64>,
 
     // build-time only, all dropped at finish()
     parent_fs: Vec<u64>,
@@ -120,7 +134,7 @@ impl IndexBuilder {
         Self {
             nodes: Vec::new(),
             arena: String::new(),
-            native_ids: Vec::new(),
+            fs_ids: Vec::new(),
             parent_fs: Vec::new(),
             fs_to_node: FsIdMap::new(),
             root_fs: None,
@@ -137,7 +151,7 @@ impl IndexBuilder {
         self.nodes.reserve(entries);
         self.parent_fs.reserve(entries);
         if self.caps.has_stable_ids {
-            self.native_ids.reserve(entries);
+            self.fs_ids.reserve(entries);
         }
         // Names average well under 32 bytes; over-reserving the arena costs
         // more than the occasional regrow.
@@ -162,7 +176,7 @@ impl IndexBuilder {
         let Self {
             mut nodes,
             mut arena,
-            mut native_ids,
+            mut fs_ids,
             parent_fs,
             fs_to_node,
             root_fs,
@@ -181,9 +195,10 @@ impl IndexBuilder {
                 synthesize_node(
                     &mut nodes,
                     &mut arena,
-                    &mut native_ids,
+                    &mut fs_ids,
                     has_ids,
                     "",
+                    SYNTHETIC_ROOT_FS_ID,
                     None, // becomes its own parent
                 )
             }
@@ -206,7 +221,7 @@ impl IndexBuilder {
                 Some(_) => node.parent = id, // self-parent that is not the root
                 None => {
                     warnings.push(ScanWarning::MissingParent {
-                        fs_id: native_ids.get(i).copied().unwrap_or(0),
+                        fs_id: fs_ids.get(i).copied().unwrap_or(0),
                         parent_id: parent_fs_id,
                     });
                     node.parent = id;
@@ -227,9 +242,10 @@ impl IndexBuilder {
             let folder = synthesize_node(
                 &mut nodes,
                 &mut arena,
-                &mut native_ids,
+                &mut fs_ids,
                 has_ids,
                 ORPHAN_FOLDER_NAME,
+                ORPHAN_FS_ID,
                 Some(root),
             );
             for id in unrooted {
@@ -251,7 +267,7 @@ impl IndexBuilder {
         nodes.shrink_to_fit();
         arena.shrink_to_fit();
 
-        let index = Index::from_parts(nodes, arena, children, native_ids, root, caps);
+        let index = Index::from_parts(nodes, arena, children, fs_ids, root, caps);
         (index, warnings.into_vec())
     }
 }
@@ -311,7 +327,7 @@ impl EntrySink for IndexBuilder {
                 // hard-linked file - distinguishes them in the high bits so
                 // each gets its own map slot, while every one of them still
                 // reports the single record they all describe.
-                self.native_ids.push(entry.fs_id & 0x0000_FFFF_FFFF_FFFF);
+                self.fs_ids.push(entry.fs_id);
             }
             self.fs_to_node.insert(entry.fs_id, id);
 
@@ -350,9 +366,10 @@ fn clamp_name(name: &str) -> &str {
 fn synthesize_node(
     nodes: &mut Vec<Node>,
     arena: &mut String,
-    native_ids: &mut Vec<u64>,
+    fs_ids: &mut Vec<u64>,
     has_stable_ids: bool,
     name: &str,
+    fs_id: u64,
     parent: Option<NodeId>,
 ) -> NodeId {
     let id = NodeId::new(nodes.len() as u32);
@@ -369,7 +386,7 @@ fn synthesize_node(
     });
 
     if has_stable_ids {
-        native_ids.push(0);
+        fs_ids.push(fs_id);
     }
     id
 }

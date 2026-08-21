@@ -72,6 +72,12 @@ pub struct ScanDoneDto {
     pub total_size: u64,
     pub total_display: String,
     pub elapsed_ms: u64,
+    /// True when the index came from a snapshot with the journal replayed onto
+    /// it rather than from an MFT sweep. The result is the same index either
+    /// way; this only says how long it took and why.
+    pub from_cache: bool,
+    /// One line for the status bar, empty for an ordinary scan.
+    pub source_note: String,
 }
 
 /// One volume for the drive-selection UI.
@@ -455,4 +461,14 @@ pub struct NodeInfoDto {
     pub allocated_display: String,
     pub files: u32,
     pub dirs: u32,
+}
+
+/// What the scan cache occupies on disk, for the settings dialog.
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheUsageDto {
+    /// Snapshots stored, one per volume.
+    pub count: u64,
+    pub bytes: u64,
+    /// Preformatted, so the dialog needs no unit logic of its own.
+    pub display: String,
 }

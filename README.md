@@ -41,6 +41,12 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
   bytes count once; alternate data streams count toward their owner's size
   on disk; free space is a first-class row; reparse points are flagged and
   never followed.
+- **Rescans are nearly free** - a finished scan is written to a compressed
+  snapshot, and scanning that drive again reloads it and asks the NTFS change
+  journal what changed since, re-reading only those records off the disk. The
+  result is the same index a full sweep produces, in a fraction of the time.
+  Nothing loads unasked: the cache is consulted when you scan a drive, never
+  at startup. Switch it off under Settings > General.
 - **Virtualized results list** - millions of rows scroll smoothly; only the
   visible window ever crosses from Rust to the UI. Sortable by any column,
   multi-select with Ctrl/Shift, live selection totals.
@@ -97,7 +103,7 @@ EmFit/
 +-- package.json          # frontend deps + scripts (dev -> vite frontend)
 +-- emfit-core/           # logic; testable headless
 |   +-- src/{model,parser,service,error.rs,lib.rs}
-|   +-- src/bin/emfit-cli.rs  # verification CLI: volumes, scan, stats, read-mft, tree-size
+|   +-- src/bin/emfit-cli.rs  # verification CLI: volumes, scan, stats, read-mft, tree-size, cache
 |   +-- tests/fixtures/   # fixture MFT records for parser tests
 +-- src-tauri/            # Tauri shell (Rust)
 |   +-- src/{main.rs,lib.rs,commands.rs,error.rs}

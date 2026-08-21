@@ -14,14 +14,14 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use emfit_core::error::{Error, Result};
-use emfit_core::model::index::{Index, NodeId};
+use emfit_core::model::index::{FS_OBJECT_MASK, Index, NodeId};
 use emfit_core::model::volume::VolumeInfo;
 use emfit_core::parser::block::{AlignedBuf, BlockSource, FileBlockSource};
 use emfit_core::parser::ntfs::attr::AttributeType;
 use emfit_core::parser::ntfs::record::{Record, RecordHeader};
 use emfit_core::parser::ntfs::{ScanOptions, bootstrap};
 use emfit_core::service::task::{CancellationToken, Progress};
-use emfit_core::service::{benchlog, elevation, scan, volume};
+use emfit_core::service::{benchlog, cache, elevation, replay, scan, view, volume};
 
 const USAGE: &str = "\
 EmFit verification CLI (M1) - see features.md sec 10 for the eventual full surface
@@ -33,7 +33,12 @@ Usage:
   emfit-cli stats     (--drive C | --image FILE) [--mode ...] [--no-free-space]
   emfit-cli read-mft  (--drive C | --image FILE) --record N [--mode ...]
   emfit-cli tree-size (--drive C | --image FILE) [--depth N] [--top N]
+  emfit-cli cache     list | verify | clear
+  emfit-cli cache     replay --drive C   [--find TEXT] [--top N]
 
+Scanning a drive uses its cached snapshot and replays the change journal onto
+it when it can (caching.md); --no-cache forces a real sweep, --save-cache
+writes the result back for next time.
 Raw volume access needs Administrator; --image does not.
 RUST_LOG=debug for engine diagnostics.";
 
@@ -68,6 +73,7 @@ fn main() -> ExitCode {
         "stats" => cmd_scan(&parsed, true),
         "read-mft" => cmd_read_mft(&parsed),
         "tree-size" => cmd_tree_size(&parsed),
+        "cache" => cmd_cache(&parsed),
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             Ok(())
@@ -105,6 +111,10 @@ struct CliArgs {
     depth: usize,
     top: usize,
     no_free_space: bool,
+    no_cache: bool,
+    save_cache: bool,
+    find: Option<String>,
+    rest: Vec<String>,
 }
 
 impl CliArgs {
@@ -161,6 +171,11 @@ impl CliArgs {
                         .map_err(|_| "--top needs a number".to_string())?;
                 }
                 "--no-free-space" => out.no_free_space = true,
+                "--find" => out.find = Some(value("--find")?.to_string()),
+                "--no-cache" => out.no_cache = true,
+                "--save-cache" => out.save_cache = true,
+                // Sub-commands (`cache list`) rather than flags.
+                other if !other.starts_with('-') => out.rest.push(other.to_string()),
                 other => return Err(format!("unknown flag `{other}`")),
             }
         }
@@ -182,6 +197,11 @@ impl CliArgs {
             mode: self.mode,
             sweep: ScanOptions::default(),
             skip_free_space: self.no_free_space,
+            cache: if self.no_cache {
+                scan::CachePolicy::Ignore
+            } else {
+                scan::CachePolicy::Use
+            },
         }
     }
 }
@@ -234,6 +254,20 @@ fn cmd_scan(args: &CliArgs, verbose_stats: bool) -> Result<()> {
     let root = index.node(index.root());
 
     println!("mode:             {}", outcome.mode.as_str());
+    match &outcome.source {
+        scan::OutcomeSource::Scanned => println!("source:           MFT sweep"),
+        scan::OutcomeSource::Cached {
+            age,
+            replay,
+            orders,
+        } => println!(
+            "source:           cache ({} old, {} journal events, {} records re-read,              {} sort orders)",
+            format_age(*age),
+            replay.events,
+            replay.records,
+            orders.len(),
+        ),
+    }
     println!("index nodes:      {}", index.len());
     println!(
         "files:            {}   directories: {}",
@@ -294,6 +328,334 @@ fn cmd_scan(args: &CliArgs, verbose_stats: bool) -> Result<()> {
     if let Ok(path) = benchlog::path() {
         eprintln!("benchlog: {}", path.display());
     }
+    Ok(())
+}
+
+/// `cache list`, `cache verify`, `cache replay`, `cache clear`.
+fn cmd_cache(args: &CliArgs) -> Result<()> {
+    match args.rest.first().map(String::as_str) {
+        Some("list") | None => {
+            let entries = cache::list()?;
+            if entries.is_empty() {
+                println!("no cached scans in {}", cache::dir()?.display());
+                return Ok(());
+            }
+            println!("Volume  Nodes        Size  Age        Journal  Taken");
+            let mut total = 0u64;
+            for entry in &entries {
+                let manifest = &entry.manifest;
+                total += entry.bytes;
+                println!(
+                    "{:<7} {:>10} {:>9}  {:<10} {:<8} {}",
+                    manifest.volume.root_label,
+                    manifest.scan.nodes,
+                    human(entry.bytes),
+                    format_age(manifest.scan.age()),
+                    if manifest.journal.is_some() {
+                        "yes"
+                    } else {
+                        "no"
+                    },
+                    manifest.scan.taken_at,
+                );
+            }
+            println!("\n{} snapshots, {} total", entries.len(), human(total));
+            println!("{}", cache::dir()?.display());
+            Ok(())
+        }
+        Some("verify") => {
+            let entries = cache::list()?;
+            if entries.is_empty() {
+                println!("no cached scans to verify");
+                return Ok(());
+            }
+            for entry in entries {
+                verify_snapshot(&entry)?;
+            }
+            Ok(())
+        }
+        Some("replay") => cmd_cache_replay(args),
+        Some("clear") => {
+            let removed = cache::clear()?;
+            println!("removed {removed} snapshot(s)");
+            Ok(())
+        }
+        Some(other) => Err(usage_err(format!("unknown cache command `{other}`"))),
+    }
+}
+
+/// `cache replay --drive C`: what the journal says changed since the snapshot.
+///
+/// A pure diagnostic - it reads, reports, and writes nothing back, so it can be
+/// run twice in a row and say the same thing. This is how to check that a file
+/// created, edited, or deleted a moment ago actually reaches the index.
+fn cmd_cache_replay(args: &CliArgs) -> Result<()> {
+    let letter = args
+        .drive
+        .ok_or_else(|| usage_err("cache replay needs --drive C".to_string()))?;
+    let volume = find_volume(letter)?;
+    let stamp = cache::VolumeStamp::of(&volume);
+
+    let Some(loaded) = cache::load(&stamp)? else {
+        println!("no cached scan for {}", volume.display_name());
+        return Ok(());
+    };
+    println!(
+        "snapshot: {} nodes, taken {} ({} ago)",
+        loaded.columns.len(),
+        loaded.manifest.scan.taken_at,
+        format_age(loaded.manifest.scan.age())
+    );
+    let Some(journal) = loaded.manifest.journal else {
+        println!("it recorded no journal position, so it cannot be replayed");
+        return Ok(());
+    };
+
+    let (source, _) = scan::open_volume_source(&volume, scan::ScanMode::Auto)?;
+    let layout = bootstrap::probe(&source)?;
+    let cancel = CancellationToken::new();
+
+    let started = Instant::now();
+    match replay::replay(letter, &layout, journal, loaded.columns.len(), &cancel)? {
+        replay::Replay::Blocked(reason) => {
+            println!("cannot replay: {}", reason.explain());
+            println!("a scan of this volume would sweep the MFT instead");
+        }
+        replay::Replay::Unchanged { .. } => {
+            println!("nothing has changed since the snapshot was taken");
+        }
+        replay::Replay::Changed { patch, stats, .. } => {
+            println!(
+                "{} journal events over {} records, in {:.0} ms",
+                stats.events,
+                stats.records,
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+
+            // A record that was touched but produced no entry is a file that
+            // no longer exists; the rest are its current state.
+            let fresh: std::collections::HashSet<u64> = patch
+                .entries
+                .iter()
+                .map(|e| e.fs_id & FS_OBJECT_MASK)
+                .collect();
+            let gone: Vec<u64> = patch
+                .replace
+                .iter()
+                .copied()
+                .filter(|record| !fresh.contains(record))
+                .collect();
+
+            // Record number -> node, so a changed file can be shown with the
+            // path the snapshot knew it by. One pass over the id column; the
+            // alternative is a scan of three million ids per line printed.
+            let wanted: std::collections::HashSet<u64> = gone
+                .iter()
+                .copied()
+                .chain(patch.entries.iter().map(|e| e.parent_id & FS_OBJECT_MASK))
+                .collect();
+            let mut by_record: std::collections::HashMap<u64, usize> =
+                std::collections::HashMap::with_capacity(wanted.len());
+            for (at, &fs_id) in loaded.columns.fs_ids.iter().enumerate() {
+                let record = fs_id & FS_OBJECT_MASK;
+                if wanted.contains(&record) {
+                    by_record.entry(record).or_insert(at);
+                }
+            }
+
+            let root = loaded.manifest.volume.root_label.as_str();
+            let needle = args.find.as_ref().map(|text| text.to_lowercase());
+            let matches = |text: &str| match &needle {
+                Some(needle) => text.to_lowercase().contains(needle.as_str()),
+                None => true,
+            };
+            // A search is asking about one thing; a listing is asking for a
+            // sample. Only the sample needs a limit.
+            let limit = if needle.is_some() {
+                usize::MAX
+            } else {
+                args.top
+            };
+            if let Some(text) = &args.find {
+                println!("\nshowing only what matches `{text}`");
+            }
+
+            let added: Vec<(String, u64, u64)> = patch
+                .entries
+                .iter()
+                .map(|entry| {
+                    let parent = by_record
+                        .get(&(entry.parent_id & FS_OBJECT_MASK))
+                        .map(|&at| snapshot_path(&loaded.columns, at, root))
+                        .unwrap_or_else(|| "(a folder the snapshot never saw)".to_string());
+                    (
+                        format!("{parent}\\{}", entry.name),
+                        entry.size,
+                        entry.fs_id & FS_OBJECT_MASK,
+                    )
+                })
+                .filter(|(path, _, _)| matches(path))
+                .collect();
+
+            println!("\n{} of {} entries now:", added.len(), patch.entries.len());
+            for (path, size, record) in added.iter().take(limit) {
+                println!("  + {:>10}  {path}   [record {record}]", human(*size));
+            }
+            if added.len() > limit {
+                println!(
+                    "  ... and {} more (raise --top, or narrow with --find TEXT)",
+                    added.len() - limit
+                );
+            }
+
+            let removed: Vec<(String, u64)> = gone
+                .iter()
+                .map(|&record| {
+                    let was = by_record
+                        .get(&record)
+                        .map(|&at| snapshot_path(&loaded.columns, at, root))
+                        .unwrap_or_else(|| "(not in the snapshot either)".to_string());
+                    (was, record)
+                })
+                .filter(|(was, _)| matches(was))
+                .collect();
+
+            println!("\n{} of {} records now empty:", removed.len(), gone.len());
+            for (was, record) in removed.iter().take(limit) {
+                println!("  - {was}   [record {record}]");
+            }
+            if removed.len() > limit {
+                println!(
+                    "  ... and {} more (raise --top, or narrow with --find TEXT)",
+                    removed.len() - limit
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The full path of one node in a loaded snapshot, its own name included.
+///
+/// A snapshot is columns, not an `Index`, so there is no `path()` to call -
+/// but the parent column is all a walk needs. The root parents itself and is
+/// unnamed, which is where the volume's label goes.
+fn snapshot_path(columns: &cache::Columns, at: usize, root_label: &str) -> String {
+    let mut parts: Vec<&str> = vec![columns.name(at)];
+    let mut cur = at;
+    // The parent chain is acyclic by construction; the bound is a backstop
+    // against a hand-edited snapshot.
+    for _ in 0..256 {
+        let parent = columns.parents[cur] as usize;
+        if parent == cur {
+            break;
+        }
+        cur = parent;
+        parts.push(columns.name(cur));
+    }
+
+    let mut out = root_label.to_string();
+    for part in parts.iter().rev().filter(|part| !part.is_empty()) {
+        if !out.ends_with('\\') {
+            out.push('\\');
+        }
+        out.push_str(part);
+    }
+    out
+}
+
+/// Load a snapshot and rebuild the index from it, reporting what that cost.
+///
+/// Needs no volume and no elevation, which is the point: it exercises
+/// everything about a cached load except the journal replay, against the real
+/// file rather than a fixture.
+fn verify_snapshot(entry: &cache::Entry) -> Result<()> {
+    println!(
+        "{} ({}, {} nodes, taken {})",
+        entry.path.display(),
+        human(entry.bytes),
+        entry.manifest.scan.nodes,
+        entry.manifest.scan.taken_at
+    );
+
+    let started = Instant::now();
+    let loaded = cache::snapshot::load(&entry.path)?;
+    let read = started.elapsed();
+
+    let started = Instant::now();
+    let (index, warnings, stats) = cache::snapshot::rebuild(
+        &loaded.columns,
+        loaded.manifest.caps.clone(),
+        &cache::Patch::default(),
+        &CancellationToken::new(),
+    )?;
+    let rebuilt = started.elapsed();
+
+    let root = index.node(index.root());
+    println!("  read      {:>8.0} ms", read.as_secs_f64() * 1000.0);
+    println!("  rebuild   {:>8.0} ms", rebuilt.as_secs_f64() * 1000.0);
+    println!("  nodes     {:>8}   (kept {})", index.len(), stats.kept);
+    println!(
+        "  totals    {} in {} files, {} directories",
+        human(root.total_size()),
+        root.file_count(),
+        root.dir_count()
+    );
+    println!("  root      {}", index.path(index.root()));
+    println!(
+        "  orders    {} of {} cached",
+        loaded.orders.len(),
+        cache::CACHED_ORDERS.len()
+    );
+    if !warnings.is_empty() {
+        println!("  warnings  {}", warnings.len());
+        for w in warnings.iter().take(4) {
+            println!("    - {w:?}");
+        }
+    }
+    Ok(())
+}
+
+/// `3h`, `2d`, `just now` - enough to judge a snapshot at a glance.
+fn format_age(age: std::time::Duration) -> String {
+    let secs = age.as_secs();
+    match secs {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m", secs / 60),
+        3600..=86_399 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    }
+}
+
+/// Write the scan out for next time, when the user asked for it.
+///
+/// Only sort columns that are expensive to rebuild are computed here; the app
+/// warms them anyway after every scan, so the CLI does the same work rather
+/// than shipping a snapshot the app would have to finish.
+fn save_cache(volume: &VolumeInfo, outcome: &scan::VolumeScanOutcome) -> Result<()> {
+    let Some(journal) = outcome.journal else {
+        eprintln!("note: no journal position recorded; not caching this scan");
+        return Ok(());
+    };
+    let started = Instant::now();
+    let orders: Vec<_> = cache::CACHED_ORDERS
+        .iter()
+        .map(|&key| (key, view::build_order(&outcome.index, key)))
+        .collect();
+    eprintln!(
+        "sort orders built in {:.2}s",
+        started.elapsed().as_secs_f64()
+    );
+
+    let manifest = cache::manifest_for(
+        volume,
+        &outcome.index,
+        journal,
+        outcome.stats.elapsed,
+        outcome.mode.as_str(),
+    );
+    let path = cache::save(&outcome.index, &outcome.fold, &manifest, &orders)?;
+    eprintln!("cache written: {}", path.display());
     Ok(())
 }
 
@@ -473,7 +835,11 @@ fn run_scan(args: &CliArgs) -> Result<scan::VolumeScanOutcome> {
                 human(volume.total_bytes),
                 human(volume.free_bytes)
             );
-            scan::scan_volume(&volume, &options, &mut progress, &cancel)?
+            let outcome = scan::scan_volume(&volume, &options, &mut progress, &cancel)?;
+            if args.save_cache {
+                save_cache(&volume, &outcome)?;
+            }
+            outcome
         }
         Target::Image(path) => scan::scan_image(&path, &options, &mut progress, &cancel)?,
     };

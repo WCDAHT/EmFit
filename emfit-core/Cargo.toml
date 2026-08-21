@@ -21,6 +21,9 @@ chrono = { workspace = true }
 rayon = { workspace = true }
 # Search's regex filter field (service::query).
 regex = { workspace = true }
+# Scan-cache container (service::cache): section compression and checksums.
+lz4_flex = { workspace = true }
+twox-hash = { workspace = true }
 
 # Volume discovery and elevation checks. Windows-only by design: the rest of
 # the core - including raw device reads - runs on `std` alone, so Linux and

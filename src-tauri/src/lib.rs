@@ -89,6 +89,8 @@ pub fn run() {
             commands::log_event,
             commands::get_config,
             commands::set_config,
+            commands::cache_usage,
+            commands::clear_cache,
             commands::list_volumes,
             commands::elevation_status,
             commands::relaunch_elevated,

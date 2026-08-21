@@ -186,6 +186,14 @@ impl Node {
     }
 }
 
+/// Bits of a scanner id that are the filesystem object's own number.
+///
+/// A scanner that emits several entries for one object - the names of a
+/// hard-linked file - distinguishes them above this mask, so every entry
+/// still reports the one record it describes. See [`Index::native_id`] and
+/// `IndexBuilder`'s id contract.
+pub const FS_OBJECT_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+
 /// A scanned volume: every file and directory, flat and immutable.
 pub struct Index {
     /// Every node. [`NodeId`] indexes this.
@@ -195,9 +203,11 @@ pub struct Index {
     /// Every parent->child edge, grouped by parent (CSR). A node's children are
     /// `children[first_child .. first_child + child_count]`.
     children: Vec<NodeId>,
-    /// Filesystem-native ids, parallel to `nodes`. Empty when the volume has
-    /// no stable ids; zero for synthetic nodes.
-    native_ids: Vec<u64>,
+    /// The id each entry was pushed under, parallel to `nodes`. Empty when the
+    /// volume has no stable ids. Held whole rather than masked: the extra bits
+    /// are what tell one hard link from another, which is what lets a snapshot
+    /// round-trip through the builder ([`crate::service::cache`]).
+    fs_ids: Vec<u64>,
     /// The volume root. Its parent is itself.
     root: NodeId,
     /// What this volume can and cannot report.
@@ -217,14 +227,14 @@ impl Index {
         nodes: Vec<Node>,
         arena: String,
         children: Vec<NodeId>,
-        native_ids: Vec<u64>,
+        fs_ids: Vec<u64>,
         root: NodeId,
         caps: VolumeCaps,
     ) -> Self {
         debug_assert!(root.index() < nodes.len(), "root out of range");
         debug_assert!(
-            native_ids.is_empty() || native_ids.len() == nodes.len(),
-            "native_ids must be empty or parallel to nodes"
+            fs_ids.is_empty() || fs_ids.len() == nodes.len(),
+            "fs_ids must be empty or parallel to nodes"
         );
         debug_assert_eq!(
             children.len(),
@@ -236,7 +246,7 @@ impl Index {
             nodes,
             arena,
             children,
-            native_ids,
+            fs_ids,
             root,
             caps,
         }
@@ -310,10 +320,24 @@ impl Index {
     ///
     /// [`VolumeCaps::has_stable_ids`]: crate::model::caps::VolumeCaps::has_stable_ids
     pub fn native_id(&self, id: NodeId) -> Option<u64> {
-        if self.native_ids.is_empty() || self.node(id).is_synthetic() {
+        if self.node(id).is_synthetic() {
             return None;
         }
-        self.native_ids.get(id.index()).copied()
+        self.fs_id(id).map(|fs_id| fs_id & FS_OBJECT_MASK)
+    }
+
+    /// The whole id this node was pushed under, hard-link discriminator bits
+    /// included. Synthetic nodes have one too - the builder reserves ids for
+    /// the nodes it invents - which is what lets a snapshot round-trip.
+    #[inline]
+    pub fn fs_id(&self, id: NodeId) -> Option<u64> {
+        self.fs_ids.get(id.index()).copied()
+    }
+
+    /// Every id, in node order. Empty when the volume has no stable ids.
+    #[inline]
+    pub fn fs_ids(&self) -> &[u64] {
+        &self.fs_ids
     }
 
     /// Ancestors from this node's parent up to and including the root.

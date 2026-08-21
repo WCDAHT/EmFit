@@ -33,14 +33,17 @@ use crate::parser::ntfs::record::Record;
 use crate::parser::ntfs::scanner::{AdsStream, ROOT_RECORD, ScanOptions, ScanStats};
 use crate::parser::ntfs::{bitmap, retrieval, scanner};
 use crate::service::benchlog;
+use crate::service::cache::{self, JournalStamp};
 use crate::service::fold::CaseFold;
+use crate::service::replay;
 use crate::service::task::{CancellationToken, Progress};
+use crate::service::usn;
 
 /// The synthetic id the free-space row is pushed under. All ones - no real
 /// MFT record can collide (record numbers are 48-bit) and no hard-link alias
 /// can either (aliases reuse a real record's low 48 bits, and this value's
 /// low 48 bits are no mintable record number).
-const FREE_SPACE_FS_ID: u64 = u64::MAX;
+pub const FREE_SPACE_FS_ID: u64 = u64::MAX;
 
 /// How the caller wants the volume opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -75,6 +78,19 @@ impl AccessMode {
     }
 }
 
+/// Whether a scan may answer from the cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CachePolicy {
+    /// Load this volume's snapshot and replay the change journal onto it when
+    /// both are available, sweeping the MFT only when they are not. The
+    /// default, because the result is the same index either way.
+    #[default]
+    Use,
+    /// Read the table, whatever is cached. The escape hatch for a user who
+    /// suspects the cache, and what the CLI uses when measuring a real sweep.
+    Ignore,
+}
+
 /// Tuning for one volume scan.
 #[derive(Debug, Clone, Default)]
 pub struct VolumeScanOptions {
@@ -83,6 +99,7 @@ pub struct VolumeScanOptions {
     /// Skip the synthetic free-space row. On by default because the treemap
     /// and totals should account for the whole volume (features.md sec 1.3).
     pub skip_free_space: bool,
+    pub cache: CachePolicy,
 }
 
 /// Everything one volume scan produced.
@@ -101,6 +118,36 @@ pub struct VolumeScanOutcome {
     /// search compares names with this, not with a global rule
     /// (features.md sec 2).
     pub fold: CaseFold,
+    /// Where the change journal stood when this scan started, when the volume
+    /// has one. Without it the result cannot be cached: a snapshot with no
+    /// journal position can never be brought up to date (`caching.md` sec 6.1).
+    pub journal: Option<JournalStamp>,
+    /// Whether the index was read off the volume or off a snapshot.
+    pub source: OutcomeSource,
+}
+
+/// How an index came to exist.
+#[derive(Debug, Default)]
+pub enum OutcomeSource {
+    /// Swept off the MFT.
+    #[default]
+    Scanned,
+    /// Rebuilt from a snapshot with the journal replayed onto it.
+    Cached {
+        /// How old the snapshot was.
+        age: std::time::Duration,
+        replay: replay::ReplayStats,
+        /// Sort columns the snapshot carried, ready to install instead of
+        /// being warmed (`caching.md` sec 7).
+        orders: std::collections::HashMap<crate::service::view::SortKey, Vec<u32>>,
+    },
+}
+
+impl OutcomeSource {
+    /// True when no MFT sweep was needed.
+    pub fn is_cached(&self) -> bool {
+        matches!(self, Self::Cached { .. })
+    }
 }
 
 /// The capabilities an NTFS volume has. One place, so the UI, search, and the
@@ -142,40 +189,39 @@ fn scan_volume_inner(
     cancel: &CancellationToken,
 ) -> Result<VolumeScanOutcome> {
     let (source, mode) = open_volume_source(volume, options.mode)?;
-    let mut layout = bootstrap::probe(&source)?;
+    let layout = probe_layout(&source, volume)?;
 
-    // The driver's map is authoritative for a mounted volume - one ioctl and
-    // it reflects whatever the filesystem believes right now. Taken only when
-    // it covers everything record 0 claims exists; otherwise the record 0 map
-    // (already validated) stands.
-    if let Some(letter) = volume.drive_letter() {
-        match retrieval::mft_extents(
-            letter,
-            layout.boot.bytes_per_cluster,
-            layout.boot.bytes_per_record,
-        ) {
-            Ok(extents) if extents.capacity_records() >= layout.records_to_scan() => {
-                tracing::debug!(
-                    fragments = extents.fragment_count(),
-                    "using the driver's $MFT extent map"
-                );
-                layout.extents = extents;
-            }
-            Ok(short) => tracing::warn!(
-                driver_records = short.capacity_records(),
-                needed = layout.records_to_scan(),
-                "driver extent map is shorter than $MFT's data size; keeping the record 0 map"
-            ),
-            Err(e) => {
-                tracing::debug!(error = %e, "retrieval pointers unavailable; using the record 0 map");
-            }
+    // The cheap way first. Only a volume that cannot be brought up to date
+    // from its journal gets its table swept (`caching.md` sec 6).
+    if options.cache == CachePolicy::Use {
+        match from_cache(volume, options, &layout, mode, progress, cancel) {
+            Ok(Some(outcome)) => return Ok(outcome),
+            Ok(None) => {}
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            // A cache is an optimization; nothing about it is worth failing a
+            // scan over.
+            Err(e) => tracing::warn!(error = %e, "cache: reload failed; sweeping instead"),
         }
     }
 
     let free_space =
         (!options.skip_free_space && volume.free_bytes > 0).then_some(volume.free_bytes);
 
-    run_scan(
+    // Where the journal stands *now*, before a single record is read. Anything
+    // that changes during the sweep is then replayed by the next run rather
+    // than missed - safe because replay re-reads records (`caching.md` sec 6.1).
+    let journal = volume.drive_letter().and_then(|letter| match usn::query(letter) {
+        Ok(state) => Some(JournalStamp {
+            id: state.id,
+            next_usn: state.next_usn,
+        }),
+        Err(e) => {
+            tracing::info!(error = %e, "usn: no journal position; this scan will not be cacheable");
+            None
+        }
+    });
+
+    let mut outcome = run_scan(
         &source,
         &layout,
         ntfs_caps(volume.root_label()),
@@ -184,7 +230,154 @@ fn scan_volume_inner(
         free_space,
         progress,
         cancel,
-    )
+    )?;
+    outcome.journal = journal;
+    Ok(outcome)
+}
+
+/// Recover the MFT layout, preferring the filesystem driver's own extent map.
+///
+/// The driver's map is authoritative for a mounted volume - one ioctl and it
+/// reflects whatever the filesystem believes right now. Taken only when it
+/// covers everything record 0 claims exists; otherwise the record 0 map
+/// (already validated) stands.
+fn probe_layout(source: &FileBlockSource, volume: &VolumeInfo) -> Result<MftLayout> {
+    let mut layout = bootstrap::probe(source)?;
+    let Some(letter) = volume.drive_letter() else {
+        return Ok(layout);
+    };
+    match retrieval::mft_extents(
+        letter,
+        layout.boot.bytes_per_cluster,
+        layout.boot.bytes_per_record,
+    ) {
+        Ok(extents) if extents.capacity_records() >= layout.records_to_scan() => {
+            tracing::debug!(
+                fragments = extents.fragment_count(),
+                "using the driver's $MFT extent map"
+            );
+            layout.extents = extents;
+        }
+        Ok(short) => tracing::warn!(
+            driver_records = short.capacity_records(),
+            needed = layout.records_to_scan(),
+            "driver extent map is shorter than $MFT's data size; keeping the record 0 map"
+        ),
+        Err(e) => {
+            tracing::debug!(error = %e, "retrieval pointers unavailable; using the record 0 map");
+        }
+    }
+    Ok(layout)
+}
+
+/// Rebuild this volume's index from its snapshot, brought up to date.
+///
+/// `Ok(None)` is the ordinary answer for "there is nothing cached, or what is
+/// cached cannot be trusted to be brought up to date" - every one of those
+/// cases is a reason to sweep, not an error.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "internal seam; every argument is used"
+)]
+fn from_cache(
+    volume: &VolumeInfo,
+    options: &VolumeScanOptions,
+    layout: &MftLayout,
+    mode: AccessMode,
+    progress: &mut dyn FnMut(Progress),
+    cancel: &CancellationToken,
+) -> Result<Option<VolumeScanOutcome>> {
+    let started = Instant::now();
+    let stamp = cache::VolumeStamp::of(volume);
+    let Some(loaded) = cache::load(&stamp)? else {
+        return Ok(None);
+    };
+
+    let Some(letter) = volume.drive_letter() else {
+        return Ok(None); // no journal without a mount point
+    };
+    let Some(from) = loaded.manifest.journal else {
+        tracing::info!("cache: {}", replay::Blocked::NoPosition.explain());
+        return Ok(None);
+    };
+
+    progress(Progress::started("Reading the change journal", None));
+    let nodes = loaded.columns.len();
+    let (mut patch, journal, replayed) = match replay::replay(letter, layout, from, nodes, cancel)?
+    {
+        replay::Replay::Blocked(reason) => {
+            tracing::info!(
+                "cache: cannot replay - {}; sweeping instead",
+                reason.explain()
+            );
+            return Ok(None);
+        }
+        replay::Replay::Unchanged { journal } => (
+            cache::Patch::default(),
+            journal,
+            replay::ReplayStats::default(),
+        ),
+        replay::Replay::Changed {
+            patch,
+            journal,
+            stats,
+        } => (patch, journal, stats),
+    };
+
+    // Free space is a property of the volume right now, not of the scan that
+    // produced the snapshot, so it is refreshed rather than replayed.
+    patch.free_bytes =
+        (!options.skip_free_space && volume.free_bytes > 0).then_some(volume.free_bytes);
+
+    progress(Progress::started(
+        "Rebuilding the index",
+        Some(nodes as u64),
+    ));
+    let caps = ntfs_caps(volume.root_label());
+    let (index, warnings, rebuilt) =
+        cache::snapshot::rebuild(&loaded.columns, caps, &patch, cancel)?;
+    progress(Progress::Finished);
+
+    let root = index.node(index.root());
+    let stats = ScanStats {
+        files: u64::from(root.file_count()),
+        directories: u64::from(root.dir_count()),
+        entries_emitted: index.len() as u64,
+        records_read: replayed.records,
+        reads: replayed.reads,
+        bytes_read: replayed.bytes_read,
+        elapsed: started.elapsed(),
+        ..ScanStats::default()
+    };
+    tracing::info!(
+        volume = %volume.display_name(),
+        nodes = index.len(),
+        age_s = loaded.manifest.scan.age().as_secs(),
+        events = replayed.events,
+        records = replayed.records,
+        kept = rebuilt.kept,
+        dropped = rebuilt.dropped,
+        added = rebuilt.added,
+        elapsed_ms = stats.elapsed.as_millis() as u64,
+        "cache: index rebuilt from the snapshot"
+    );
+
+    Ok(Some(VolumeScanOutcome {
+        index,
+        warnings,
+        stats,
+        // Alternate data streams are not stored in the snapshot: nothing reads
+        // them yet, and they would cost a section as large as the arena.
+        ads: Vec::new(),
+        mode,
+        fold: loaded.fold,
+        journal: Some(journal),
+        source: OutcomeSource::Cached {
+            age: loaded.manifest.scan.age(),
+            replay: replayed,
+            orders: loaded.orders,
+        },
+    }))
 }
 
 /// Scan an NTFS filesystem inside a disk image file.
@@ -439,6 +632,8 @@ fn run_scan(
         ads: outcome.ads,
         mode,
         fold,
+        journal: None,
+        source: OutcomeSource::Scanned,
     })
 }
 

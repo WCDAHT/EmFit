@@ -10,6 +10,20 @@ export interface AppConfig {
   /** Size-unit setting consumed by `lib/format.ts` ("dynamic" or a fixed unit). */
   size_unit: string;
   treemap: TreemapConfig;
+  /** Whether a scan may answer from the cached snapshot, replaying the change
+   *  journal onto it instead of sweeping the MFT. */
+  cache_enabled: boolean;
+  /** Ceiling on the cache directory, in MiB. */
+  cache_budget_mb: number;
+}
+
+/** Mirror of `CacheUsageDto`: what the scan cache occupies on disk. */
+export interface CacheUsage {
+  /** Snapshots stored, one per volume. */
+  count: number;
+  bytes: number;
+  /** Preformatted size, so the dialog needs no unit logic of its own. */
+  display: string;
 }
 
 /** Mirror of `TreemapConfig`: how the treemap colors rectangles. */
@@ -39,6 +53,11 @@ export interface ScanDoneEvent {
   total_size: number;
   total_display: string;
   elapsed_ms: number;
+  /** True when the index was rebuilt from a cached snapshot with the change
+   *  journal replayed onto it, rather than swept off the MFT. */
+  from_cache: boolean;
+  /** How that went, for the status line. Empty for an ordinary scan. */
+  source_note: string;
 }
 
 /** One volume for the drive-selection UI. */

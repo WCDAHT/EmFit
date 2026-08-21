@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  CacheUsage,
   NodeInfoDto,
   NodeRef,
   PresetDto,
@@ -36,6 +37,17 @@ export function getConfig(): Promise<AppConfig> {
  *  {@link getConfig} with the changed fields mutated. */
 export function setConfig(config: AppConfig): Promise<void> {
   return invoke("set_config", { newConfig: config });
+}
+
+/** How much disk the cached scans take, and how many there are. */
+export function cacheUsage(): Promise<CacheUsage> {
+  return invoke("cache_usage");
+}
+
+/** Delete every cached scan; resolves with what is left (nothing). The next
+ *  scan of a volume reads its file table the long way and caches that. */
+export function clearCache(): Promise<CacheUsage> {
+  return invoke("clear_cache");
 }
 
 /** Every volume on the machine, with scannability and scanned state. */

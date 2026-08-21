@@ -16,7 +16,7 @@
   milestone - plus the free-space toggle).
 -->
 <script lang="ts">
-  import { getConfig, setConfig } from "../ipc";
+  import { cacheUsage, clearCache, getConfig, setConfig } from "../ipc";
   import { session, queryChanged } from "../session.svelte";
   import { SIZE_UNITS, type SizeUnit } from "../format";
 
@@ -37,6 +37,14 @@
   let sizeUnit = $state<SizeUnit>("dynamic");
   let mode = $state<"ranked" | "extension">("ranked");
   let showFreeSpace = $state(false);
+  let cacheEnabled = $state(true);
+  // What the cache holds, and what the last clear did. Read when the dialog
+  // opens; clearing acts at once rather than waiting for Save, because it is
+  // an action, not a setting.
+  let cacheSize = $state("");
+  let cacheCount = $state(0);
+  let clearing = $state(false);
+  let cleared = $state("");
 
   // Re-seed from the live session every time the dialog opens.
   $effect(() => {
@@ -45,8 +53,37 @@
       sizeUnit = session.sizeUnit;
       mode = session.colorMode;
       showFreeSpace = session.showFreeSpace;
+      // Not mirrored in the session - nothing but this dialog reads it.
+      void getConfig().then((cfg) => (cacheEnabled = cfg.cache_enabled));
+      cleared = "";
+      void refreshCacheUsage();
     }
   });
+
+  async function refreshCacheUsage() {
+    const usage = await cacheUsage();
+    cacheSize = usage.display;
+    cacheCount = usage.count;
+  }
+
+  async function onClearCache() {
+    clearing = true;
+    const freed = cacheSize;
+    const count = cacheCount;
+    try {
+      const usage = await clearCache();
+      cacheSize = usage.display;
+      cacheCount = usage.count;
+      cleared =
+        count === 0
+          ? "There was nothing cached."
+          : `Removed ${count} cached scan${count === 1 ? "" : "s"}, freeing ${freed}.`;
+    } catch (e) {
+      cleared = `Could not clear the cache: ${e}`;
+    } finally {
+      clearing = false;
+    }
+  }
 
   function unitLabel(u: SizeUnit): string {
     return u === "dynamic" ? "Dynamic (largest unit >= 1)" : u;
@@ -55,6 +92,7 @@
   async function save() {
     const config = await getConfig();
     config.size_unit = sizeUnit;
+    config.cache_enabled = cacheEnabled;
     config.treemap = {
       color_mode: mode,
       show_free_space: showFreeSpace,
@@ -116,6 +154,35 @@
               Applies to every size shown anywhere in the app. Byte units
               step by 1024, bit units by 1000.
             </p>
+
+            <label class="toggle">
+              <input type="checkbox" bind:checked={cacheEnabled} />
+              Reuse the last scan of a drive
+            </label>
+            <p class="hint">
+              Scanning a drive reloads its last scan and asks the change
+              journal what has changed since, re-reading only those files.
+              The result is the same as a full scan, in a fraction of the
+              time. Turn this off to always read the whole file table.
+            </p>
+
+            <div class="row">
+              <button
+                class="btn"
+                onclick={() => void onClearCache()}
+                disabled={clearing || cacheCount === 0}
+              >
+                {clearing ? "Clearing..." : "Clear cached scans"}
+              </button>
+              <span class="hint">
+                {cacheCount === 0
+                  ? "Nothing cached yet."
+                  : `${cacheCount} cached scan${cacheCount === 1 ? "" : "s"}, ${cacheSize}.`}
+              </span>
+            </div>
+            {#if cleared}
+              <p class="hint">{cleared}</p>
+            {/if}
           {:else if tab === "treemap"}
             <label class="field">
               Color files by
@@ -268,6 +335,15 @@
     font-size: var(--font-size-caption);
   }
 
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .toggle {
     display: flex;
     align-items: center;

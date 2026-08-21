@@ -64,7 +64,7 @@
 //! recorded individually in [`SweepOutcome::ads`], keyed by the owning MFT
 //! record, so a detail pane can list them later.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -80,7 +80,8 @@ use crate::parser::ntfs::attr::{
 };
 use crate::parser::ntfs::bitmap;
 use crate::parser::ntfs::bootstrap::MftLayout;
-use crate::parser::ntfs::record::{Record, RecordHeader};
+use crate::parser::ntfs::live::LiveRecords;
+use crate::parser::ntfs::record::{Record, RecordForm, RecordHeader};
 use crate::service::task::{CancellationToken, Progress};
 
 /// NTFS's root directory. Its `$FILE_NAME` names itself as its own parent,
@@ -461,6 +462,280 @@ pub fn sweep(
     Ok(SweepOutcome { stats, ads })
 }
 
+// ---------------------------------------------------------------------------
+// targeted reads
+// ---------------------------------------------------------------------------
+
+/// Most bytes one targeted read covers. Records are 1 KiB, so a run of 64
+/// neighbours costs the same single seek as one of them - and dirty sets
+/// cluster, because a build output directory occupies consecutive records.
+const MAX_TARGET_SPAN: usize = 64 * 1024;
+
+/// How many rounds of "read what the last round pointed at" to run before
+/// giving up. Two is enough for every real record (a base names its extension
+/// records, an extension names its base); the rest is slack.
+const MAX_TARGET_ROUNDS: usize = 4;
+
+/// What one targeted read produced besides what went into the sink.
+#[derive(Debug, Default)]
+pub struct TargetedOutcome {
+    pub stats: ScanStats,
+    pub ads: Vec<AdsStream>,
+    /// Records whose `$ATTRIBUTE_LIST` is non-resident, so where their names
+    /// and data live cannot be learned without reading it. A sweep finds those
+    /// parts anyway because it reads everything; a targeted read cannot, so the
+    /// caller must fall back rather than emit a record with missing parts.
+    pub opaque: Vec<u64>,
+    /// Every record the read visited, sorted - the ones asked for plus the
+    /// ones their attribute lists led to. A caller replacing nodes has to
+    /// replace all of these, not just what it asked for, or a record whose
+    /// entries were re-emitted ends up in the index twice.
+    pub read: Vec<u64>,
+}
+
+/// Where [`read_records`] gets its bytes.
+///
+/// The choice is not about speed, it is about *when*. A sweep reads the volume
+/// because that is one sequential pass over a table it wants all of. Replay
+/// asks about records that changed seconds ago, and only the filesystem's own
+/// cached copy reflects that yet - see [`LiveRecords`].
+pub enum RecordSource<'a> {
+    /// Straight off the volume, the way a sweep reads. What a disk image and
+    /// an unmounted volume have.
+    Blocks(&'a dyn BlockSource),
+    /// Through the filesystem driver, which serves the copy it is about to
+    /// write down rather than the one already written.
+    Driver(&'a mut LiveRecords),
+}
+
+/// Parse a chosen set of MFT records instead of sweeping the whole table.
+///
+/// This is what makes journal replay cheap: the journal says which records
+/// changed, and only those - plus whatever their attribute lists point at - are
+/// read. Everything downstream is identical to a sweep: the same [`parse_one`],
+/// the same held-base resolution, the same entries at the sink. A replayed
+/// index and a rescanned one therefore agree by construction rather than by two
+/// implementations happening to match. See `caching.md` sec 6.4.
+///
+/// `records` need not be sorted or unique. Records that are free, unnamed, or
+/// past the end of the MFT simply produce no entries; the caller learns which
+/// by diffing what it asked for against what arrived.
+pub fn read_records(
+    source: &mut RecordSource<'_>,
+    layout: &MftLayout,
+    records: &[u64],
+    sink: &mut dyn EntrySink,
+    cancel: &CancellationToken,
+) -> Result<TargetedOutcome> {
+    let started = Instant::now();
+    let record_size = layout.boot.bytes_per_record as usize;
+    let capacity = layout.capacity_records();
+
+    let mut queue: Vec<u64> = records.iter().copied().filter(|&r| r < capacity).collect();
+    queue.sort_unstable();
+    queue.dedup();
+
+    let mut seen: HashSet<u64> = queue.iter().copied().collect();
+    let mut outcome = TargetedOutcome::default();
+    let mut held = Held::default();
+
+    for _ in 0..MAX_TARGET_ROUNDS {
+        if queue.is_empty() || cancel.is_cancelled() {
+            break;
+        }
+        let mut next: Vec<u64> = Vec::new();
+        let outputs = match source {
+            RecordSource::Blocks(blocks) => {
+                let mut outputs = Vec::new();
+                for run in coalesce(&queue, layout, record_size) {
+                    if cancel.is_cancelled() {
+                        break;
+                    }
+                    let mut out = WorkerOut::default();
+                    read_run(*blocks, layout, &run, record_size, &mut out, &mut outcome)?;
+                    outputs.push(out);
+                }
+                outputs
+            }
+            RecordSource::Driver(live) => {
+                // One call per record: there is no seek to amortize, because
+                // the driver is answering out of memory.
+                let mut out = WorkerOut::default();
+                for &record in &queue {
+                    if cancel.is_cancelled() {
+                        break;
+                    }
+                    outcome.stats.records_read += 1;
+                    outcome.stats.reads += 1;
+                    // `None` is a free record, which is how a deletion looks.
+                    let form = live.form();
+                    if let Some(bytes) = live.read(record)? {
+                        outcome.stats.bytes_read += bytes.len() as u64;
+                        parse_one(
+                            record,
+                            bytes,
+                            layout.boot.bytes_per_sector,
+                            layout.boot.bytes_per_cluster,
+                            form,
+                            &mut out,
+                        );
+                    }
+                }
+                vec![out]
+            }
+        };
+
+        for mut out in outputs {
+            outcome.stats.absorb(&out.stats);
+            for warning in out.warnings.drain(..) {
+                sink.warn(warning);
+            }
+            for (id, base) in out.bases.drain(..) {
+                if base.opaque_list {
+                    outcome.opaque.push(id);
+                }
+                for &record in &base.extension_records {
+                    if record < capacity && seen.insert(record) {
+                        next.push(record);
+                    }
+                }
+                held.bases.insert(id, base);
+            }
+            for (id, extension) in out.extensions.drain(..) {
+                // An extension record was touched but its base was not. The
+                // base holds the name and the size, so it has to be read too.
+                if id < capacity && seen.insert(id) {
+                    next.push(id);
+                }
+                held.extensions.entry(id).or_default().push(extension);
+            }
+            outcome.ads.append(&mut out.ads);
+            if flush(&mut out.batch, &mut outcome.stats, sink) == ControlFlow::Break(()) {
+                outcome.stats.cancelled = true;
+                return Ok(outcome);
+            }
+        }
+
+        next.sort_unstable();
+        queue = next;
+    }
+
+    outcome.read = seen.into_iter().collect();
+    outcome.read.sort_unstable();
+
+    if !queue.is_empty() {
+        tracing::warn!(
+            pending = queue.len(),
+            "targeted read did not settle; some extension records were left unread"
+        );
+    }
+
+    if cancel.is_cancelled() {
+        outcome.stats.cancelled = true;
+    } else {
+        let mut batch = Batch::default();
+        resolve_held(&mut held, &mut batch, &mut outcome.stats, sink);
+    }
+
+    outcome.stats.elapsed = started.elapsed();
+    tracing::debug!(
+        asked = records.len(),
+        read = outcome.stats.records_read,
+        reads = outcome.stats.reads,
+        emitted = outcome.stats.entries_emitted,
+        opaque = outcome.opaque.len(),
+        elapsed_ms = outcome.stats.elapsed.as_millis(),
+        "targeted MFT read complete"
+    );
+    Ok(outcome)
+}
+
+/// One read's worth of records: consecutive on disk, though not necessarily
+/// consecutive in the request.
+struct Run {
+    first: u64,
+    /// How many record slots the read spans, wanted or not.
+    slots: u64,
+    /// Slots left in the fragment `first` sits in - the run cannot outgrow it.
+    available: u64,
+    byte_offset: u64,
+    /// Which of those slots were actually asked for, as offsets from `first`.
+    wanted: Vec<u64>,
+}
+
+/// Group sorted record numbers into runs one read can cover.
+///
+/// A run never crosses an extent boundary (the locator says how many records
+/// remain in the fragment) and never exceeds [`MAX_TARGET_SPAN`], so reading
+/// over a gap between two wanted records is bounded waste that buys one seek.
+fn coalesce(records: &[u64], layout: &MftLayout, record_size: usize) -> Vec<Run> {
+    let max_slots = (MAX_TARGET_SPAN / record_size).max(1) as u64;
+    let mut runs: Vec<Run> = Vec::new();
+
+    for &record in records {
+        if let Some(run) = runs.last_mut() {
+            let offset = record - run.first;
+            if offset < max_slots && offset < run.available {
+                run.slots = offset + 1;
+                run.wanted.push(offset);
+                continue;
+            }
+        }
+        let Some(location) = layout.extents.locate(record) else {
+            continue; // past the mapped extents
+        };
+        runs.push(Run {
+            first: record,
+            slots: 1,
+            available: location.contiguous_records,
+            byte_offset: location.byte_offset,
+            wanted: vec![0],
+        });
+    }
+    runs
+}
+
+/// Read one run and parse the records that were asked for.
+fn read_run(
+    source: &dyn BlockSource,
+    layout: &MftLayout,
+    run: &Run,
+    record_size: usize,
+    out: &mut WorkerOut,
+    outcome: &mut TargetedOutcome,
+) -> Result<()> {
+    // A record offset is record-aligned, not necessarily sector-aligned (1 KiB
+    // records on a 4Kn disk), so read the surrounding aligned window. The
+    // fragment starts on a cluster and is a whole number of clusters long, so
+    // rounding outwards stays inside it.
+    let sector = u64::from(source.sector_size()).max(1);
+    let start = run.byte_offset / sector * sector;
+    let lead = (run.byte_offset - start) as usize;
+    let body = run.slots as usize * record_size;
+    let span = (lead + body).div_ceil(sector as usize) * sector as usize;
+
+    let mut buf = AlignedBuf::for_source(source, span);
+    source.read_exact_at(start, buf.as_mut_slice())?;
+
+    outcome.stats.reads += 1;
+    outcome.stats.bytes_read += span as u64;
+    outcome.stats.records_read += run.wanted.len() as u64;
+
+    let bytes = buf.as_mut_slice();
+    for &offset in &run.wanted {
+        let at = lead + offset as usize * record_size;
+        parse_one(
+            run.first + offset,
+            &mut bytes[at..at + record_size],
+            layout.boot.bytes_per_sector,
+            layout.boot.bytes_per_cluster,
+            RecordForm::OnDisk,
+            out,
+        );
+    }
+    Ok(())
+}
+
 /// Fan one chunk's records out across rayon workers.
 ///
 /// Every worker folds into its own [`WorkerOut`], so the parse takes no locks;
@@ -482,6 +757,7 @@ fn parse_chunk(
                 record_bytes,
                 bytes_per_sector,
                 bytes_per_cluster,
+                RecordForm::OnDisk,
                 &mut out,
             );
             out
@@ -586,10 +862,19 @@ struct WorkerOut {
 /// The index builder keys entries by their filesystem id, so several names for
 /// one file need distinct ids or they displace each other. Record numbers use
 /// the low 48 bits, leaving the top free for a counter - and the builder masks
-/// those bits off again when recording the native id, so every link still
+/// those bits off again when reporting the native id, so every link still
 /// reports the one record it describes.
+///
+/// The counter is `index + 1`, never `index`: the owning name is emitted under
+/// the bare record number, and [`owning_slot`] can pick any slot, so a zero
+/// counter would mint the owner's id a second time and the two would fight
+/// over one slot in the builder's id map.
 fn alias_id(record: u64, index: usize) -> u64 {
-    (record & 0x0000_FFFF_FFFF_FFFF) | ((index as u64) << 48)
+    // 16 bits of counter. No real record carries anywhere near that many
+    // names; a corrupt one that claims to is clamped rather than wrapped into
+    // another record's id space.
+    let counter = (index as u64 + 1).min(0xFFFF);
+    (record & 0x0000_FFFF_FFFF_FFFF) | (counter << 48)
 }
 
 /// Hand the batch to the sink. The borrowed view is built only now that the
@@ -646,6 +931,14 @@ struct Fields {
 struct HeldBase {
     fields: Fields,
     names: Vec<NameCandidate>,
+    /// Records its `$ATTRIBUTE_LIST` sends names or data to. A sweep does not
+    /// need these - it reads every record anyway and matches on
+    /// `base_record()` - but a targeted read ([`read_records`]) has no other
+    /// way to find them.
+    extension_records: Vec<u64>,
+    /// The attribute list is non-resident, so where the parts live cannot be
+    /// known without reading it. Only a full sweep can complete this record.
+    opaque_list: bool,
 }
 
 /// Attributes harvested from one extension record.
@@ -793,6 +1086,7 @@ fn parse_one(
     record_bytes: &mut [u8],
     bytes_per_sector: u32,
     bytes_per_cluster: u32,
+    form: RecordForm,
     out: &mut WorkerOut,
 ) {
     let stats = &mut out.stats;
@@ -814,7 +1108,7 @@ fn parse_one(
 
     let base = header.base_record();
 
-    let record = match Record::parse(record_bytes, bytes_per_sector) {
+    let record = match Record::parse_as(record_bytes, bytes_per_sector, form) {
         Ok(record) => record,
         Err(e) => {
             stats.failed_fixup += 1;
@@ -836,8 +1130,11 @@ fn parse_one(
         ..Fields::default()
     };
     let mut saw_dos_name = false;
-    // True when an $ATTRIBUTE_LIST sends a name or the data elsewhere.
-    let mut split = false;
+    // Records an $ATTRIBUTE_LIST sends a name or the data to. Non-empty means
+    // this record is split and must be held back.
+    let mut elsewhere: Vec<u64> = Vec::new();
+    // Set when the list itself is non-resident: split, but where to is unknown.
+    let mut opaque_list = false;
     // Disk bytes of this record's alternate data streams.
     let mut ads_allocated = 0u64;
 
@@ -947,13 +1244,13 @@ fn parse_one(
             }
             AttributeType::AttributeList => {
                 if let Some(value) = attribute.resident_value() {
-                    split = references_elsewhere(value, number);
+                    elsewhere = elsewhere_records(value, number);
                 }
                 // A non-resident attribute list is vanishingly rare and would
                 // need its own read; treat the record as split so it is held
                 // back rather than emitted with missing parts.
                 else {
-                    split = true;
+                    opaque_list = true;
                 }
             }
             _ => {}
@@ -967,6 +1264,7 @@ fn parse_one(
     // An extension record's attributes belong to another file, and a record
     // held back needs its names to outlive the read buffer. Both take owned
     // copies and rewind the arena.
+    let split = opaque_list || !elsewhere.is_empty();
     if base.is_some() || split {
         let names: Vec<NameCandidate> = batch
             .slots
@@ -995,7 +1293,15 @@ fn parse_one(
         } else {
             stats.deferred_bases += 1;
             fields.allocated += ads_allocated;
-            out.bases.push((number, HeldBase { fields, names }));
+            out.bases.push((
+                number,
+                HeldBase {
+                    fields,
+                    names,
+                    extension_records: elsewhere,
+                    opaque_list,
+                },
+            ));
         }
         return;
     }
@@ -1078,10 +1384,16 @@ fn owning_name(names: &[NameCandidate]) -> usize {
 /// An attribute list can be entirely self-referential - listing attributes that
 /// never actually moved - in which case the record is complete as read and
 /// holding it back would be waste.
-fn references_elsewhere(value: &[u8], own_record: u64) -> bool {
-    attr::parse_attribute_list(value)
+fn elsewhere_records(value: &[u8], own_record: u64) -> Vec<u64> {
+    let mut out: Vec<u64> = attr::parse_attribute_list(value)
         .iter()
-        .any(|entry| matches!(entry.type_code, 0x30 | 0x80) && entry.record_number != own_record)
+        .filter(|entry| matches!(entry.type_code, 0x30 | 0x80))
+        .map(|entry| entry.record_number)
+        .filter(|&record| record != own_record)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// Whether `candidate` should displace the namespace chosen so far.
@@ -1186,16 +1498,29 @@ mod tests {
             list_entry(0x80, 100),
         ]
         .concat();
-        assert!(!references_elsewhere(&value, 100));
+        assert!(elsewhere_records(&value, 100).is_empty());
     }
 
     #[test]
     fn a_list_pointing_at_another_record_forces_deferral() {
         let value: Vec<u8> = [list_entry(0x10, 100), list_entry(0x80, 350)].concat();
-        assert!(references_elsewhere(&value, 100));
+        assert_eq!(elsewhere_records(&value, 100), vec![350]);
 
         let names_elsewhere: Vec<u8> = [list_entry(0x30, 900)].concat();
-        assert!(references_elsewhere(&names_elsewhere, 100));
+        assert_eq!(elsewhere_records(&names_elsewhere, 100), vec![900]);
+    }
+
+    #[test]
+    fn elsewhere_records_are_sorted_and_deduplicated() {
+        // A targeted read turns this list into its next round of reads, so
+        // one record named by three attributes must not be read three times.
+        let value: Vec<u8> = [
+            list_entry(0x80, 350),
+            list_entry(0x80, 200),
+            list_entry(0x30, 350),
+        ]
+        .concat();
+        assert_eq!(elsewhere_records(&value, 100), vec![200, 350]);
     }
 
     #[test]
@@ -1203,7 +1528,7 @@ mod tests {
         // A security descriptor or index allocation living elsewhere changes
         // nothing EmFit reads, so it must not trigger a deferral.
         let value: Vec<u8> = [list_entry(0x50, 400), list_entry(0xA0, 400)].concat();
-        assert!(!references_elsewhere(&value, 100));
+        assert!(elsewhere_records(&value, 100).is_empty());
     }
 
     fn slot(namespace: Namespace) -> NameSlot {
@@ -1248,9 +1573,12 @@ mod tests {
         // Extra names need their own key in the builder's map, yet must still
         // point back at the one record they all describe.
         let record = 123_456u64;
-        let ids = [record, alias_id(record, 1), alias_id(record, 2)];
+        let ids = [record, alias_id(record, 0), alias_id(record, 1)];
 
-        assert_ne!(ids[0], ids[1]);
+        assert_ne!(
+            ids[0], ids[1],
+            "slot 0 is an alias whenever another slot owns the bytes"
+        );
         assert_ne!(ids[1], ids[2]);
         for id in ids {
             assert_eq!(
@@ -1268,6 +1596,12 @@ mod tests {
         assert_ne!(alias_id(100, 1), alias_id(101, 1));
         assert_ne!(alias_id(100, 1), alias_id(100, 2));
         assert_ne!(alias_id(100, 1), 101);
+
+        // The owning entry keeps the bare record number, so no alias of that
+        // record may ever equal it.
+        for index in 0..8 {
+            assert_ne!(alias_id(100, index), 100);
+        }
     }
 
     #[test]

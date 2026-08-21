@@ -9,7 +9,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use std::time::Duration;
+
 use emfit_core::model::index::Index;
+use emfit_core::model::volume::VolumeInfo;
+use emfit_core::service::cache::JournalStamp;
 use emfit_core::service::fold::CaseFold;
 use emfit_core::service::query::RawQuery;
 use emfit_core::service::search::Hit;
@@ -22,6 +26,23 @@ pub struct ScannedVolume {
     pub key: String,
     pub index: Arc<Index>,
     pub fold: CaseFold,
+    /// What it would take to write this volume's scan cache. Absent for disk
+    /// images and for volumes with no change journal - a snapshot that could
+    /// never be brought up to date is not worth the disk.
+    pub cacheable: Option<Cacheable>,
+}
+
+/// Everything `cache::save` needs that the index itself does not carry.
+#[derive(Clone)]
+pub struct Cacheable {
+    pub info: VolumeInfo,
+    pub journal: JournalStamp,
+    pub duration: Duration,
+    /// `physical`, `volume`, or `image`.
+    pub access_mode: String,
+    /// True when this index came out of the snapshot with nothing replayed,
+    /// so rewriting it would only churn a few hundred megabytes of disk.
+    pub unchanged: bool,
 }
 
 /// The current result view: the hits the last completed query produced, in
@@ -75,6 +96,11 @@ pub struct Inner {
     /// Bumped whenever `volumes`/`sort_ranks` are invalidated, so warmers
     /// that started against an older volume set never install stale ranks.
     pub ranks_epoch: u64,
+    /// Sort orders a cached load brought with it, waiting to be turned into
+    /// ranks. Only usable for a single-volume view: ranks are positions in one
+    /// ordering, and merging two volumes' orders costs what building them did
+    /// (`caching.md` sec 7).
+    pub cached_orders: Option<(String, HashMap<SortKey, Vec<u32>>)>,
 }
 
 pub struct AppState {

@@ -139,6 +139,27 @@ impl RecordHeader {
     }
 }
 
+/// Which form a record's bytes arrived in.
+///
+/// The distinction exists because there are two ways to get a record and they
+/// do not agree. Reading the volume gives the record **as stored**: NTFS has
+/// replaced the last two bytes of every sector with a check value, and the
+/// displaced bytes live in the update sequence array. Asking the filesystem
+/// for it ([`crate::parser::ntfs::live`]) gives the record **as used**: the
+/// driver has already put those bytes back.
+///
+/// Applying the fixup to a record that has had it applied would corrupt two
+/// bytes per sector, and *not* applying it to a stored record would leave a
+/// check value where real data belongs. Neither mistake announces itself, so
+/// the form is carried explicitly rather than guessed per record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordForm {
+    /// As stored on the volume: the fixup still has to be applied.
+    OnDisk,
+    /// As the filesystem hands it out: the fixup is already in place.
+    Repaired,
+}
+
 /// A validated, repaired MFT record.
 #[derive(Debug)]
 pub struct Record<'a> {
@@ -153,8 +174,19 @@ impl<'a> Record<'a> {
     /// sector, and assuming 512 silently mangles every record on a native 4Kn
     /// drive.
     pub fn parse(buf: &'a mut [u8], bytes_per_sector: u32) -> Result<Self> {
+        Self::parse_as(buf, bytes_per_sector, RecordForm::OnDisk)
+    }
+
+    /// As [`Record::parse`], for a record that may already be repaired.
+    ///
+    /// A stored record that fails its check is a torn write and an error - the
+    /// detection is the whole point of the mechanism. A record the filesystem
+    /// repaired has no check left to make.
+    pub fn parse_as(buf: &'a mut [u8], bytes_per_sector: u32, form: RecordForm) -> Result<Self> {
         let header = RecordHeader::parse(buf)?;
-        apply_fixup(buf, &header, bytes_per_sector)?;
+        if form == RecordForm::OnDisk {
+            apply_fixup(buf, &header, bytes_per_sector)?;
+        }
         Self::from_repaired(buf, header)
     }
 

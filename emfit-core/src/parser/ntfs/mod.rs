@@ -11,6 +11,7 @@
 //! - [`runs`] - decoding the `(length, offset)` lists NTFS stores extents in
 //! - [`extents`] - where the MFT is, and how much can be read at once
 //! - [`retrieval`] - asking the filesystem driver for the same map, faster
+//! - [`live`] - asking the driver for individual records, cache and all
 //!
 //! # Finding the MFT
 //!
@@ -36,6 +37,7 @@ pub mod bitmap;
 pub mod boot;
 pub mod bootstrap;
 pub mod extents;
+pub mod live;
 pub mod record;
 pub mod retrieval;
 pub mod runs;
@@ -46,6 +48,7 @@ pub use bitmap::MftBitmap;
 pub use boot::BootSector;
 pub use bootstrap::{MftLayout, probe, read_boot_sector};
 pub use extents::{Extent, MftExtents, RecordLocation};
-pub use record::{Record, RecordHeader};
+pub use live::LiveRecords;
+pub use record::{Record, RecordForm, RecordHeader};
 pub use runs::DataRun;
 pub use scanner::{AdsStream, ScanOptions, ScanStats, SweepOutcome, sweep};

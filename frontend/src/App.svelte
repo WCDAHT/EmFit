@@ -66,7 +66,9 @@
               message: "",
               done: 0,
               total: null,
-              summary: `${payload.files.toLocaleString()} files, ${formatSize(payload.total_size)} in ${(payload.elapsed_ms / 1000).toFixed(1)}s`,
+              summary:
+                `${payload.files.toLocaleString()} files, ${formatSize(payload.total_size)} in ${(payload.elapsed_ms / 1000).toFixed(1)}s` +
+                (payload.source_note ? ` (${payload.source_note})` : ""),
             }
           : {
               phase: "error",

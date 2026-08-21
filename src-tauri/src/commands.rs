@@ -20,22 +20,26 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use emfit_core::model::index::NodeId;
+use emfit_core::model::volume::VolumeInfo;
+use emfit_core::service::cache;
 use emfit_core::service::config::Config;
+use emfit_core::service::fold::CaseFold;
 use emfit_core::service::query::Query;
 use emfit_core::service::task::{CancellationToken, Progress};
 use emfit_core::service::treemap::TreemapOptions;
+use emfit_core::service::view::SortKey;
 use emfit_core::service::{
     breakdown, elevation, presets, scan, search, tree, treemap, view, volume,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dto::{
-    DrillDto, NodeInfoDto, PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto, ScanProgressDto,
-    ScanTargetDto, SelectionSummaryDto, SortDto, TreeRowDto, TreemapRectDto, TypeRowDto,
-    ViewUpdatedDto, VolumeDto,
+    CacheUsageDto, DrillDto, NodeInfoDto, PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto,
+    ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto, TreeRowDto, TreemapRectDto,
+    TypeRowDto, ViewUpdatedDto, VolumeDto,
 };
 use crate::error::{CommandError, CommandResult};
-use crate::state::{AppState, ScannedVolume};
+use crate::state::{AppState, Cacheable, ScannedVolume};
 
 /// The most rows one window may request. The viewport shows a few dozen;
 /// anything larger is a bug or an attempt to ship the index across IPC.
@@ -122,9 +126,15 @@ pub fn start_scan(
         // Fresh indexes -> fresh deletion watchers (roadmap M5).
         crate::watch::respawn_all(&app);
 
+        // Write the cache first and warm afterwards: the file is what saves
+        // the next scan twelve seconds, and it must not depend on the window
+        // staying open for the ten seconds of warm-up.
+        let epoch = app.state::<AppState>().inner.lock().unwrap().ranks_epoch;
+        let saving = save_snapshots(&app, epoch);
+
         // Everything-style fast sort: precompute every column's ordering in
         // the background so header clicks are integer-rank sorts.
-        warm_sort_ranks(&app);
+        warm_sort_ranks(&app, saving);
     });
     Ok(())
 }
@@ -133,7 +143,11 @@ pub fn start_scan(
 /// at a time, aborting the moment a new scan invalidates the volume set.
 /// Order matters: the default sort first, then the columns whose uncached
 /// sorts are the most expensive (the string-keyed ones).
-fn warm_sort_ranks(app: &AppHandle) {
+///
+/// A cached load arrives with those expensive columns already built, so this
+/// installs them and warms only what is left - then writes the snapshot back,
+/// orders included, so the next load skips the warm-up entirely.
+fn warm_sort_ranks(app: &AppHandle, saving: Option<std::thread::JoinHandle<()>>) {
     let state = app.state::<AppState>();
     let (volumes, epoch) = {
         let inner = state.inner.lock().unwrap();
@@ -144,6 +158,8 @@ fn warm_sort_ranks(app: &AppHandle) {
     if volumes.is_empty() {
         return;
     }
+
+    install_cached_orders(app, epoch);
 
     let app = app.clone();
     std::thread::spawn(move || {
@@ -200,7 +216,240 @@ fn warm_sort_ranks(app: &AppHandle) {
                 "sort ranks warmed"
             );
         }
+
+        // The snapshot has to exist before columns can be appended to it.
+        if let Some(saving) = saving
+            && saving.join().is_err()
+        {
+            tracing::warn!("cache: the snapshot writer panicked; not appending orders");
+            return;
+        }
+        append_orders(&app, epoch);
     });
+}
+
+/// Turn the sort orders a cached load brought with it into rank tables.
+///
+/// Single-volume views only, which is what scanning one drive produces: a rank
+/// is a position in one global ordering, and interleaving two volumes' orders
+/// means comparing their keys - for `Path`, exactly the seven seconds that
+/// caching them was meant to avoid (`caching.md` sec 7).
+fn install_cached_orders(app: &AppHandle, epoch: u64) {
+    let state = app.state::<AppState>();
+    let (key, orders) = {
+        let mut inner = state.inner.lock().unwrap();
+        if inner.ranks_epoch != epoch {
+            return;
+        }
+        let Some((key, orders)) = inner.cached_orders.take() else {
+            return;
+        };
+
+        // A stored order lists node ids, and a replay that added or dropped
+        // anything renumbers them - so an order from a snapshot that was
+        // patched on the way in points at the wrong rows, and sorting by it
+        // would index past the end of the index. Repairing one (binary-search
+        // the new nodes in, splice the dropped ones out) is the eventual
+        // answer; until then a changed volume warms from scratch.
+        let usable = inner
+            .volumes
+            .iter()
+            .find(|v| v.key == key)
+            .and_then(|v| v.cacheable.as_ref())
+            .is_some_and(|meta| meta.unchanged);
+        if !usable {
+            tracing::debug!(key = %key, "cache: the snapshot was patched; warming its orders");
+            return;
+        }
+        (key, orders)
+    };
+
+    let started = Instant::now();
+    let built: Vec<(SortKey, Arc<view::SortRanks>)> = orders
+        .into_iter()
+        .map(|(sort_key, order)| (sort_key, Arc::new(view::ranks_from_order(&order))))
+        .collect();
+
+    let mut inner = state.inner.lock().unwrap();
+    if inner.ranks_epoch != epoch {
+        return;
+    }
+    if inner.volumes.len() != 1 || inner.volumes[0].key != key {
+        tracing::debug!(
+            volumes = inner.volumes.len(),
+            "cache: sort orders apply to a single-volume view only; warming instead"
+        );
+        return;
+    }
+    // Every rank column is indexed by node id on the sort path, so one that is
+    // the wrong length is a panic waiting for a header click.
+    let nodes = inner.volumes[0].index.len();
+    if built.iter().any(|(_, ranks)| ranks[0].len() != nodes) {
+        tracing::warn!(key = %key, "cache: sort orders do not match the index; warming instead");
+        return;
+    }
+    let columns = built.len();
+    for (sort_key, ranks) in built {
+        inner.sort_ranks.insert(sort_key, ranks);
+    }
+    tracing::info!(
+        columns,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "cache: sort orders installed without warming"
+    );
+}
+
+/// One volume's snapshot, waiting to be written.
+struct SnapshotJob {
+    key: String,
+    index: Arc<emfit_core::model::index::Index>,
+    fold: CaseFold,
+    meta: Cacheable,
+}
+
+/// Write the scan cache for every volume that wants one, on its own thread.
+///
+/// Started as soon as the scan finishes and **not** waiting for the sort-rank
+/// warm-up: the truth costs half a second and the orders cost ten, so a file
+/// that waited for both was a file that never got written when the window was
+/// closed promptly. The orders are appended later by [`append_orders`].
+///
+/// Returns the thread's handle so the warm-up can join it before appending.
+/// Failures are logged and dropped: a missing cache costs a sweep next time.
+fn save_snapshots(app: &AppHandle, epoch: u64) -> Option<std::thread::JoinHandle<()>> {
+    let state = app.state::<AppState>();
+    let jobs: Vec<SnapshotJob> = {
+        let inner = state.inner.lock().unwrap();
+        if inner.ranks_epoch != epoch {
+            return None;
+        }
+        inner
+            .volumes
+            .iter()
+            .filter_map(|volume| {
+                let meta = volume.cacheable.as_ref()?;
+                if meta.unchanged {
+                    // It came out of this very file with nothing replayed onto
+                    // it. Rewriting 150 MB to change a timestamp helps nobody.
+                    tracing::debug!(key = %volume.key, "cache: already current; not rewriting");
+                    return None;
+                }
+                Some(SnapshotJob {
+                    key: volume.key.clone(),
+                    index: volume.index.clone(),
+                    fold: volume.fold.clone(),
+                    meta: meta.clone(),
+                })
+            })
+            .collect()
+    };
+    if jobs.is_empty() {
+        return None;
+    }
+
+    let app = app.clone();
+    Some(std::thread::spawn(move || {
+        for job in jobs {
+            let manifest = cache::manifest_for(
+                &job.meta.info,
+                &job.index,
+                job.meta.journal,
+                job.meta.duration,
+                &job.meta.access_mode,
+            );
+            // Truth only. The sort orders follow when they exist.
+            match cache::save(&job.index, &job.fold, &manifest, &[]) {
+                Ok(path) => {
+                    tracing::info!(key = %job.key, path = %path.display(), "cache: saved")
+                }
+                Err(e) => tracing::warn!(key = %job.key, error = %e, "cache: save failed"),
+            }
+        }
+
+        let budget_mb = app.state::<Mutex<Config>>().lock().unwrap().cache_budget_mb;
+        match cache::evict(budget_mb.saturating_mul(1 << 20)) {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!(
+                    removed = n,
+                    budget_mb,
+                    "cache: evicted to stay within budget"
+                )
+            }
+            Err(e) => tracing::warn!(error = %e, "cache: eviction failed"),
+        }
+    }))
+}
+
+/// One volume's warmed columns, ready to become sort orders on disk.
+type OrderJob = (
+    String,
+    VolumeInfo,
+    usize,
+    Vec<(SortKey, Arc<view::SortRanks>)>,
+);
+
+/// Put the warmed sort columns into the snapshots that are missing them.
+///
+/// Recovering an order from a rank table is an integer sort, so this costs
+/// nothing next to having built the ranks in the first place. Skips a column
+/// the file already has, which is what makes it safe to run after every scan.
+fn append_orders(app: &AppHandle, epoch: u64) {
+    let state = app.state::<AppState>();
+    let jobs: Vec<OrderJob> = {
+        let inner = state.inner.lock().unwrap();
+        if inner.ranks_epoch != epoch {
+            return;
+        }
+        inner
+            .volumes
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, volume)| {
+                let meta = volume.cacheable.as_ref()?;
+                let ranks: Vec<(SortKey, Arc<view::SortRanks>)> = cache::CACHED_ORDERS
+                    .iter()
+                    .filter_map(|&key| {
+                        let ranks = inner.sort_ranks.get(&key)?;
+                        // A rank table built over several volumes has a column
+                        // per volume; this one's is what the snapshot wants.
+                        ranks.get(slot)?;
+                        Some((key, ranks.clone()))
+                    })
+                    .collect();
+                (!ranks.is_empty()).then(|| {
+                    (
+                        volume.key.clone(),
+                        meta.info.clone(),
+                        volume.index.len(),
+                        ranks,
+                    )
+                })
+            })
+            .collect()
+    };
+
+    for (key, info, nodes, ranks) in jobs {
+        let slot = {
+            let inner = state.inner.lock().unwrap();
+            match inner.volumes.iter().position(|v| v.key == key) {
+                Some(slot) => slot,
+                None => continue,
+            }
+        };
+        let orders: Vec<(SortKey, Vec<u32>)> = ranks
+            .iter()
+            .filter_map(|(sort_key, ranks)| {
+                Some((*sort_key, view::order_from_ranks(ranks.get(slot)?)))
+            })
+            .collect();
+        let stamp = cache::VolumeStamp::of(&info);
+        match cache::append_orders(&stamp, nodes, &orders) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(key = %key, columns = n, "cache: sort orders added"),
+            Err(e) => tracing::warn!(key = %key, error = %e, "cache: appending orders failed"),
+        }
+    }
 }
 
 /// The blocking part of a scan, on its worker thread.
@@ -228,7 +477,17 @@ fn run_scan_job(app: &AppHandle, requested: &[ScanTargetDto], cancel: &Cancellat
         }
     }
 
-    let options = scan::VolumeScanOptions::default();
+    let options = scan::VolumeScanOptions {
+        // The user asked for these volumes; answering from the snapshot and
+        // replaying the journal onto it is the same answer, faster
+        // (`caching.md` sec 6). Nothing is ever loaded unasked.
+        cache: if cache_enabled(app) {
+            scan::CachePolicy::Use
+        } else {
+            scan::CachePolicy::Ignore
+        },
+        ..scan::VolumeScanOptions::default()
+    };
 
     if !targets.is_empty() {
         let names: Vec<String> = targets.iter().map(|v| v.display_name()).collect();
@@ -245,8 +504,8 @@ fn run_scan_job(app: &AppHandle, requested: &[ScanTargetDto], cancel: &Cancellat
         };
 
         let results = scan::scan_volumes(&targets, &options, &on_progress, cancel);
-        for (name, result) in names.iter().zip(results) {
-            install_outcome(app, name, result);
+        for ((name, info), result) in names.iter().zip(targets.iter()).zip(results) {
+            install_outcome(app, name, Some(info), result);
         }
     }
 
@@ -274,19 +533,34 @@ fn run_scan_job(app: &AppHandle, requested: &[ScanTargetDto], cancel: &Cancellat
             &mut on_progress,
             cancel,
         );
-        install_outcome(app, &key, result);
+        install_outcome(app, &key, None, result);
     }
 }
 
+/// Whether the user has left the scan cache switched on.
+// The `State` handle has to outlive the lock guard, so the binding is not the
+// redundant one clippy takes it for.
+#[allow(clippy::let_and_return, reason = "the State handle outlives the guard")]
+fn cache_enabled(app: &AppHandle) -> bool {
+    let config = app.state::<Mutex<Config>>();
+    let enabled = config.lock().unwrap().cache_enabled;
+    enabled
+}
+
 /// Store a finished index under `key` and announce it, or announce the error.
+///
+/// `info` is the volume it came from, absent for disk images. Without it there
+/// is nothing to file a snapshot under, so images are never cached.
 fn install_outcome(
     app: &AppHandle,
     key: &str,
+    info: Option<&VolumeInfo>,
     result: emfit_core::error::Result<scan::VolumeScanOutcome>,
 ) {
     match result {
         Ok(outcome) => {
             let root = outcome.index.node(outcome.index.root());
+            let (from_cache, note) = describe_source(&outcome);
             let done = ScanDoneDto {
                 volume: key.to_string(),
                 ok: true,
@@ -296,6 +570,26 @@ fn install_outcome(
                 total_size: root.total_size(),
                 total_display: view::human_size(root.total_size()),
                 elapsed_ms: outcome.stats.elapsed.as_millis() as u64,
+                from_cache,
+                source_note: note,
+            };
+
+            // A volume with no journal position can never be brought up to
+            // date, so writing its snapshot would only be a way to show stale
+            // data later.
+            let cacheable = info.zip(outcome.journal).map(|(info, journal)| Cacheable {
+                info: info.clone(),
+                journal,
+                duration: outcome.stats.elapsed,
+                access_mode: outcome.mode.as_str().to_string(),
+                unchanged: matches!(
+                    &outcome.source,
+                    scan::OutcomeSource::Cached { replay, .. } if replay.records == 0
+                ),
+            });
+            let orders = match outcome.source {
+                scan::OutcomeSource::Cached { orders, .. } => orders,
+                scan::OutcomeSource::Scanned => Default::default(),
             };
 
             let state = app.state::<AppState>();
@@ -305,12 +599,46 @@ fn install_outcome(
                 key: key.to_string(),
                 index: Arc::new(outcome.index),
                 fold: outcome.fold,
+                cacheable,
             });
+            if !orders.is_empty() {
+                inner.cached_orders = Some((key.to_string(), orders));
+            }
             drop(inner);
 
             let _ = app.emit("scan:done", done);
         }
         Err(e) => emit_scan_done(app, key, Some(&e.to_string())),
+    }
+}
+
+/// A line for the status bar saying how this index came to be.
+fn describe_source(outcome: &scan::VolumeScanOutcome) -> (bool, String) {
+    match &outcome.source {
+        scan::OutcomeSource::Scanned => (false, String::new()),
+        scan::OutcomeSource::Cached { age, replay, .. } => {
+            let ago = format_age(*age);
+            let note = if replay.records == 0 {
+                format!("loaded from a {ago} cache; nothing had changed")
+            } else {
+                format!(
+                    "loaded from a {ago} cache; {} changed record(s) re-read",
+                    replay.records
+                )
+            };
+            (true, note)
+        }
+    }
+}
+
+/// `3 h`, `2 d`, `moments` - enough to judge a cached scan at a glance.
+fn format_age(age: std::time::Duration) -> String {
+    let secs = age.as_secs();
+    match secs {
+        0..=59 => "moments-old".to_string(),
+        60..=3599 => format!("{}-minute-old", secs / 60),
+        3600..=86_399 => format!("{}-hour-old", secs / 3600),
+        _ => format!("{}-day-old", secs / 86_400),
     }
 }
 
@@ -326,6 +654,8 @@ fn emit_scan_done(app: &AppHandle, volume: &str, error: Option<&str>) {
             total_size: 0,
             total_display: String::new(),
             elapsed_ms: 0,
+            from_cache: false,
+            source_note: String::new(),
         },
     );
 }
@@ -746,6 +1076,31 @@ pub fn get_config(config: State<'_, Mutex<Config>>) -> Config {
 }
 
 /// Replace the application config and persist it to disk.
+/// What the cache directory currently holds, for the settings dialog.
+///
+/// Cheap: only each snapshot's header is read, never its columns.
+#[tauri::command]
+pub fn cache_usage() -> CacheUsageDto {
+    let entries = cache::list().unwrap_or_default();
+    let bytes: u64 = entries.iter().map(|e| e.bytes).sum();
+    CacheUsageDto {
+        count: entries.len() as u64,
+        bytes,
+        display: view::human_size(bytes),
+    }
+}
+
+/// Delete every cached scan. Returns what the directory holds afterwards.
+///
+/// Nothing but disk is lost - the next scan of a volume reads its table the
+/// long way and writes a fresh snapshot.
+#[tauri::command]
+pub fn clear_cache() -> CommandResult<CacheUsageDto> {
+    let removed = cache::clear()?;
+    tracing::info!(removed, "cache: cleared from the settings dialog");
+    Ok(cache_usage())
+}
+
 #[tauri::command]
 pub fn set_config(new_config: Config, config: State<'_, Mutex<Config>>) -> CommandResult<()> {
     let mut guard = config.lock().unwrap();

@@ -71,6 +71,16 @@ pub struct Config {
 
     /// Treemap coloring, edited from the settings dialog.
     pub treemap: TreemapConfig,
+
+    /// Whether a scan may answer from this volume's cached snapshot, replaying
+    /// the change journal onto it instead of sweeping the MFT
+    /// (`caching.md`). The result is the same index either way, so this is an
+    /// escape hatch rather than a preference.
+    pub cache_enabled: bool,
+
+    /// Ceiling on the cache directory, in mebibytes. The oldest snapshots are
+    /// evicted after each write until the total fits.
+    pub cache_budget_mb: u64,
     // --- add further settings here (window geometry, recent files, ...) ---
 }
 
@@ -81,6 +91,10 @@ impl Default for Config {
             theme: None,
             size_unit: "dynamic".to_string(),
             treemap: TreemapConfig::default(),
+            cache_enabled: true,
+            // Two gigabytes holds several volumes' snapshots; a 3.4M-node C:
+            // compresses to well under one.
+            cache_budget_mb: 2048,
         }
     }
 }

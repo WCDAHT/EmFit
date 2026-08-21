@@ -137,6 +137,58 @@ pub fn build_ranks(indices: &[&Index], key: SortKey) -> SortRanks {
         .collect()
 }
 
+/// One volume's node ids in a column's ascending order.
+///
+/// The inverse of a rank table, and the form the scan cache stores
+/// (`caching.md` sec 7). Ranks can only be used; an order can also be
+/// *repaired* - new nodes binary-search into it and deleted ones splice out -
+/// which is what a future replay will do instead of spending 7.2 s rebuilding
+/// the `Path` column from scratch.
+pub fn build_order(index: &Index, key: SortKey) -> Vec<u32> {
+    let mut all: Vec<Hit> = index.ids().map(|id| (0u16, id)).collect();
+    sort_hits(
+        &[index],
+        &mut all,
+        Sort {
+            key,
+            ascending: true,
+        },
+    );
+    all.into_iter().map(|(_, id)| id.get()).collect()
+}
+
+/// Turn one volume's order into the rank table the sort path wants.
+///
+/// Only valid for a single-volume view: ranks are positions in one global
+/// ordering, and merging two volumes' orders means comparing their keys, which
+/// for `Path` costs exactly as much as building the order did. A view over
+/// several volumes therefore warms its ranks the ordinary way.
+pub fn ranks_from_order(order: &[u32]) -> SortRanks {
+    let mut ranks = vec![0u32; order.len()];
+    for (position, &id) in order.iter().enumerate() {
+        // The caller has already checked that this is a permutation; a bad
+        // index here would be a cache that passed validation.
+        if let Some(slot) = ranks.get_mut(id as usize) {
+            *slot = position as u32;
+        }
+    }
+    vec![std::sync::Arc::from(ranks.into_boxed_slice())]
+}
+
+/// Recover one volume's ascending order from its rank column.
+///
+/// The inverse of [`ranks_from_order`], and the reason the cache can be
+/// written after the warm-up instead of before it: whatever the ranks cost to
+/// build, turning them back into an order is an integer sort. For a view over
+/// several volumes the ranks are positions in one global ordering, and this
+/// still yields the right per-volume order - a global order restricted to one
+/// volume is that volume's order.
+pub fn order_from_ranks(ranks: &[u32]) -> Vec<u32> {
+    let mut order: Vec<u32> = (0..ranks.len() as u32).collect();
+    order.par_sort_unstable_by_key(|&id| ranks[id as usize]);
+    order
+}
+
 /// Order hits by a precomputed rank table - the fast path for every sort
 /// after the first. Unstable is safe: ranks are a permutation, so keys are
 /// unique and there are no equal elements to keep stable.
@@ -383,6 +435,40 @@ mod tests {
         hits.iter()
             .map(|&(_, id)| index.name(id).to_string())
             .collect()
+    }
+
+    #[test]
+    fn a_cached_order_ranks_exactly_like_a_freshly_built_table() {
+        // The cache stores orders and derives ranks from them, so the two
+        // routes to a rank table have to agree node for node.
+        let index = index();
+        for key in [
+            SortKey::Name,
+            SortKey::Path,
+            SortKey::Size,
+            SortKey::Allocated,
+            SortKey::Modified,
+            SortKey::Extension,
+            SortKey::Kind,
+        ] {
+            let order = build_order(&index, key);
+            assert_eq!(order.len(), index.len(), "{key:?} covers every node");
+            assert_eq!(
+                ranks_from_order(&order),
+                build_ranks(&[&index], key),
+                "{key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ranks_and_orders_are_inverses_of_each_other() {
+        let index = index();
+        for key in [SortKey::Name, SortKey::Path, SortKey::Size] {
+            let order = build_order(&index, key);
+            let ranks = build_ranks(&[&index], key);
+            assert_eq!(order_from_ranks(&ranks[0]), order, "{key:?}");
+        }
     }
 
     #[test]

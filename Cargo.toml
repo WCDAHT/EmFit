@@ -36,6 +36,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 directories = "6"
 
+# Scan-cache container (service::cache). lz4_flex is pure Rust with safe
+# encode/decode by default - a 250 MB snapshot compresses off the UI thread and
+# decompresses faster than the bytes it saves reading. twox-hash gives the
+# per-section xxh3 checksum that decides corrupt-cache from good.
+lz4_flex = { version = "0.11", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
+twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
+
 # --- Windows only ---
 # Volume discovery and elevation (`service::volume`, `service::elevation`).
 # Pulled in through a `[target.'cfg(windows)'.dependencies]` block, so the core

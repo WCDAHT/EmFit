@@ -214,16 +214,17 @@ to deletion-marking only (see M5).
   changes, and even the reappearance of a marked path change **nothing**;
   only deletions register. Gated on `caps.live_updates`.
 - Journal-gap recovery - wrapped journal or changed id falls back to a full rescan rather than diverging silently.
-- Scan save/load ([features.md](./features.md) sec 1.6) - serialize the flat index and arena. **This is the `1.0.0` gate**, because the format becomes a compatibility promise once anyone has a saved scan.
-- Per-volume scan cache reloaded at startup, with volume serial and timestamp so staleness is visible.
+- Scan save/load ([features.md](./features.md) sec 1.6) - serialize the flat index and arena. **This is the `1.0.0` gate**, because the format becomes a compatibility promise once anyone has a saved scan. *(Landed as the snapshot container, [caching.md](./caching.md); the shareable scan file on top of it is still to do.)*
+- Per-volume scan cache, keyed by volume fingerprint, with the change journal replayed onto it so a rescan re-reads only what changed ([caching.md](./caching.md)). *(Landed.)* Consulted when the user scans a volume, never at startup - user direction 2026-08-21.
 - Exclusion list applied at index time.
 
 **Exit criteria**
 
 - Deleting a file in Explorer marks it deleted in every view within a second (red border in the treemap); creating, renaming, or restoring files changes nothing until a rescan.
-- A scan saved and reloaded is byte-identical in its query results to the original.
-- Format carries a `schema_version` (STANDARDS sec 4.5) and endianness is decided and documented.
-- Killing the app mid-scan leaves no corrupt cache.
+- A scan saved and reloaded is byte-identical in its query results to the original. *(Asserted in `tests/cache_roundtrip.rs`.)*
+- Format carries a `schema_version` (STANDARDS sec 4.5) and endianness is decided and documented. *(Little-endian; a big-endian reader refuses the file.)*
+- Killing the app mid-scan leaves no corrupt cache. *(Temporary plus rename; an abandoned write removes its own temporary.)*
+- On a real volume: scan, change files, scan again, and compare node for node against a forced sweep. **Still to run** - it needs Administrator (caching.md sec 11).
 
 **Risk:** incremental rollup is where subtle size drift creeps in. Add an
 assertion mode that re-rolls the whole index and compares.

@@ -52,6 +52,88 @@ pub enum UsnPoll {
     Gap,
 }
 
+/// Where a volume's journal stands right now.
+///
+/// A snapshot records [`JournalState::id`] and [`JournalState::next_usn`] at
+/// the moment a scan began; the next run replays from there. The id is what
+/// catches a journal that was deleted and recreated, and `first_usn` is what
+/// catches one that wrapped past the saved position - either way the saved
+/// position means nothing any more and only a rescan re-establishes truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JournalState {
+    pub id: u64,
+    /// Oldest USN the journal still holds. Records before it are gone.
+    pub first_usn: i64,
+    /// The position a read started now would begin at.
+    pub next_usn: i64,
+}
+
+/// Every reason except `USN_REASON_CLOSE`, which carries no change of its own.
+///
+/// Replay does not interpret these bits beyond "this record was touched" and
+/// "this record was deleted" - the record itself is re-read for the truth
+/// (`caching.md` sec 2.2) - so the mask is deliberately everything.
+pub const REPLAY_MASK: u32 = !0x8000_0000;
+
+/// What draining the journal from a saved position produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JournalRead {
+    /// Everything that happened since, and where a later read should resume.
+    Records {
+        events: Vec<UsnEvent>,
+        next_usn: i64,
+    },
+    /// The journal was recreated, or wrapped past the saved position. What
+    /// happened in between cannot be known.
+    Gap,
+    /// More records than the caller was willing to look at. Applying them one
+    /// by one would cost more than reading the whole table again.
+    Flooded { seen: u64 },
+}
+
+/// Read the journal's current position without opening a watcher.
+///
+/// Called before a sweep, so the snapshot records where the world stood when
+/// the scan started rather than when it finished - changes made during those
+/// seconds are then replayed rather than lost (`caching.md` sec 6.1).
+pub fn query(drive_letter: char) -> Result<JournalState> {
+    #[cfg(windows)]
+    {
+        windows_impl::query(drive_letter)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = drive_letter;
+        Err(crate::error::Error::UnsupportedPlatform {
+            operation: "USN journal query".to_string(),
+        })
+    }
+}
+
+/// Drain every record written since `start_usn`, or say why it cannot be done.
+///
+/// `max_events` bounds the work: past it, [`JournalRead::Flooded`] tells the
+/// caller to rescan instead.
+pub fn read_since(
+    drive_letter: char,
+    journal_id: u64,
+    start_usn: i64,
+    max_events: u64,
+    cancel: &crate::service::task::CancellationToken,
+) -> Result<JournalRead> {
+    #[cfg(windows)]
+    {
+        windows_impl::read_since(drive_letter, journal_id, start_usn, max_events, cancel)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (drive_letter, journal_id, start_usn, max_events, cancel);
+        Err(crate::error::Error::UnsupportedPlatform {
+            operation: "USN journal read".to_string(),
+        })
+    }
+}
+
 /// `USN_REASON_FILE_DELETE`: the file truly ceased to exist (Shift+Del,
 /// emptied bin, direct deletion).
 pub const REASON_FILE_DELETE: u32 = 0x0000_0200;
@@ -167,8 +249,9 @@ mod windows_impl {
     };
     use windows::core::PCWSTR;
 
-    use super::{REASON_MASK, UsnPoll, parse_events};
+    use super::{JournalRead, JournalState, REASON_MASK, UsnEvent, UsnPoll, parse_events};
     use crate::error::{Error, Result};
+    use crate::service::task::CancellationToken;
 
     /// Journal-loss codes that mean "gap", not "failure":
     /// entry deleted from under us (1181), journal being deleted (1178),
@@ -184,6 +267,7 @@ mod windows_impl {
         handle: HANDLE,
         journal_id: u64,
         next_usn: i64,
+        mask: u32,
         buf: Vec<u8>,
     }
 
@@ -205,49 +289,145 @@ mod windows_impl {
         }
     }
 
+    /// Open `\\.\X:` for reading. The caller owns the handle.
+    fn open_volume(drive_letter: char) -> Result<HANDLE> {
+        let path: Vec<u16> = format!("\\\\.\\{drive_letter}:")
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: valid NUL-terminated path; the caller closes the handle.
+        unsafe {
+            CreateFileW(
+                PCWSTR(path.as_ptr()),
+                FILE_GENERIC_READ.0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                None,
+            )
+        }
+        .map_err(|_| api_error("CreateFileW(\\\\.\\X:)"))
+    }
+
+    /// One `FSCTL_QUERY_USN_JOURNAL` against an open volume handle.
+    fn query_handle(handle: HANDLE) -> Result<USN_JOURNAL_DATA_V0> {
+        let mut data = USN_JOURNAL_DATA_V0::default();
+        let mut bytes = 0u32;
+        // SAFETY: valid handle; out-struct and byte count are plain
+        // out-params sized correctly.
+        let query = unsafe {
+            DeviceIoControl(
+                handle,
+                FSCTL_QUERY_USN_JOURNAL,
+                None,
+                0,
+                Some(&raw mut data as *mut _),
+                std::mem::size_of::<USN_JOURNAL_DATA_V0>() as u32,
+                Some(&mut bytes),
+                None,
+            )
+        };
+        if query.is_err() {
+            return Err(api_error("FSCTL_QUERY_USN_JOURNAL"));
+        }
+        Ok(data)
+    }
+
+    /// Close a handle whose owner is about to return early.
+    fn close(handle: HANDLE) {
+        // SAFETY: closing a handle this module opened, exactly once.
+        let _ = unsafe { CloseHandle(handle) };
+    }
+
+    pub fn query(drive_letter: char) -> Result<JournalState> {
+        let handle = open_volume(drive_letter)?;
+        let data = query_handle(handle);
+        close(handle);
+        let data = data?;
+        Ok(JournalState {
+            id: data.UsnJournalID,
+            first_usn: data.FirstUsn,
+            next_usn: data.NextUsn,
+        })
+    }
+
+    pub fn read_since(
+        drive_letter: char,
+        journal_id: u64,
+        start_usn: i64,
+        max_events: u64,
+        cancel: &CancellationToken,
+    ) -> Result<JournalRead> {
+        let state = query(drive_letter)?;
+        if state.id != journal_id {
+            tracing::info!(
+                saved = format_args!("{journal_id:#x}"),
+                found = format_args!("{:#x}", state.id),
+                "usn: journal identity changed since the snapshot"
+            );
+            return Ok(JournalRead::Gap);
+        }
+        if start_usn < state.first_usn {
+            tracing::info!(
+                start_usn,
+                first_usn = state.first_usn,
+                "usn: journal wrapped past the snapshot position"
+            );
+            return Ok(JournalRead::Gap);
+        }
+
+        let handle = open_volume(drive_letter)?;
+        let mut watcher = Watcher {
+            handle,
+            journal_id,
+            next_usn: start_usn,
+            mask: super::REPLAY_MASK,
+            buf: vec![0u8; 64 * 1024],
+        };
+
+        let mut events = Vec::new();
+        let mut seen = 0u64;
+        loop {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            match watcher.read_batch()? {
+                Batch::Gap => return Ok(JournalRead::Gap),
+                Batch::Records { matched, done } => {
+                    seen += matched.len() as u64;
+                    if seen > max_events {
+                        return Ok(JournalRead::Flooded { seen });
+                    }
+                    events.extend(matched);
+                    if done {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(JournalRead::Records {
+            events,
+            next_usn: watcher.next_usn,
+        })
+    }
+
+    /// One 64 KiB read's worth of journal.
+    enum Batch {
+        Records { matched: Vec<UsnEvent>, done: bool },
+        Gap,
+    }
+
     impl Watcher {
         pub fn open(drive_letter: char) -> Result<Self> {
-            let path: Vec<u16> = format!("\\\\.\\{drive_letter}:")
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-            // SAFETY: valid NUL-terminated path; the handle's lifetime is
-            // managed by Drop.
-            let handle = unsafe {
-                CreateFileW(
-                    PCWSTR(path.as_ptr()),
-                    FILE_GENERIC_READ.0,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    None,
-                    OPEN_EXISTING,
-                    FILE_FLAGS_AND_ATTRIBUTES(0),
-                    None,
-                )
-            }
-            .map_err(|_| api_error("CreateFileW(\\\\.\\X:)"))?;
-
-            let mut data = USN_JOURNAL_DATA_V0::default();
-            let mut bytes = 0u32;
-            // SAFETY: valid handle; out-struct and byte count are plain
-            // out-params sized correctly.
-            let query = unsafe {
-                DeviceIoControl(
-                    handle,
-                    FSCTL_QUERY_USN_JOURNAL,
-                    None,
-                    0,
-                    Some(&raw mut data as *mut _),
-                    std::mem::size_of::<USN_JOURNAL_DATA_V0>() as u32,
-                    Some(&mut bytes),
-                    None,
-                )
+            let handle = open_volume(drive_letter)?;
+            let data = match query_handle(handle) {
+                Ok(data) => data,
+                Err(e) => {
+                    close(handle);
+                    return Err(e);
+                }
             };
-            if query.is_err() {
-                let e = api_error("FSCTL_QUERY_USN_JOURNAL");
-                // SAFETY: close the handle we just opened; Drop won't run.
-                let _ = unsafe { CloseHandle(handle) };
-                return Err(e);
-            }
 
             tracing::info!(
                 drive = %drive_letter,
@@ -260,68 +440,90 @@ mod windows_impl {
                 handle,
                 journal_id: data.UsnJournalID,
                 next_usn: data.NextUsn,
+                mask: REASON_MASK,
                 buf: vec![0u8; 64 * 1024],
+            })
+        }
+
+        /// Issue one read and advance the position. `done` means the journal
+        /// had nothing more to give right now.
+        fn read_batch(&mut self) -> Result<Batch> {
+            let read = READ_USN_JOURNAL_DATA_V0 {
+                StartUsn: self.next_usn,
+                ReasonMask: self.mask,
+                ReturnOnlyOnClose: 0,
+                Timeout: 0,
+                BytesToWaitFor: 0,
+                UsnJournalID: self.journal_id,
+            };
+            let mut bytes = 0u32;
+            // SAFETY: valid handle; in-struct and out-buffer are live
+            // for the call, sizes match the allocations.
+            let result = unsafe {
+                DeviceIoControl(
+                    self.handle,
+                    FSCTL_READ_USN_JOURNAL,
+                    Some(&raw const read as *const _),
+                    std::mem::size_of::<READ_USN_JOURNAL_DATA_V0>() as u32,
+                    Some(self.buf.as_mut_ptr().cast()),
+                    self.buf.len() as u32,
+                    Some(&mut bytes),
+                    None,
+                )
+            };
+            if let Err(e) = result {
+                let code = WIN32_ERROR::from_error(&e).unwrap_or_default().0;
+                if code == ERROR_HANDLE_EOF.0 {
+                    return Ok(Batch::Records {
+                        matched: Vec::new(),
+                        done: true,
+                    });
+                }
+                if GAP_CODES.contains(&code) {
+                    tracing::warn!(code, "usn: journal gap signalled by read");
+                    return Ok(Batch::Gap);
+                }
+                tracing::warn!(code, "usn: read failed");
+                return Err(api_error("FSCTL_READ_USN_JOURNAL"));
+            }
+
+            let (next, matched) = parse_events(&self.buf[..bytes as usize], self.mask);
+            if bytes > 8 {
+                tracing::trace!(
+                    bytes,
+                    matched = matched.len(),
+                    start_usn = self.next_usn,
+                    next_usn = next,
+                    "usn: read returned records"
+                );
+            }
+            let Some(next) = next else {
+                // Header-less response: no data.
+                return Ok(Batch::Records {
+                    matched: Vec::new(),
+                    done: true,
+                });
+            };
+            let drained = bytes as usize <= 8;
+            let stalled = next == self.next_usn;
+            self.next_usn = next;
+            Ok(Batch::Records {
+                matched,
+                done: drained || stalled,
             })
         }
 
         pub fn poll(&mut self) -> Result<UsnPoll> {
             let mut events = Vec::new();
             for _ in 0..MAX_READS_PER_POLL {
-                let read = READ_USN_JOURNAL_DATA_V0 {
-                    StartUsn: self.next_usn,
-                    ReasonMask: REASON_MASK,
-                    ReturnOnlyOnClose: 0,
-                    Timeout: 0,
-                    BytesToWaitFor: 0,
-                    UsnJournalID: self.journal_id,
-                };
-                let mut bytes = 0u32;
-                // SAFETY: valid handle; in-struct and out-buffer are live
-                // for the call, sizes match the allocations.
-                let result = unsafe {
-                    DeviceIoControl(
-                        self.handle,
-                        FSCTL_READ_USN_JOURNAL,
-                        Some(&raw const read as *const _),
-                        std::mem::size_of::<READ_USN_JOURNAL_DATA_V0>() as u32,
-                        Some(self.buf.as_mut_ptr().cast()),
-                        self.buf.len() as u32,
-                        Some(&mut bytes),
-                        None,
-                    )
-                };
-                if let Err(e) = result {
-                    let code = WIN32_ERROR::from_error(&e).unwrap_or_default().0;
-                    if code == ERROR_HANDLE_EOF.0 {
-                        break; // nothing new yet
+                match self.read_batch()? {
+                    Batch::Gap => return Ok(UsnPoll::Gap),
+                    Batch::Records { matched, done } => {
+                        events.extend(matched);
+                        if done {
+                            break;
+                        }
                     }
-                    if GAP_CODES.contains(&code) {
-                        tracing::warn!(code, "usn: journal gap signalled by read");
-                        return Ok(UsnPoll::Gap);
-                    }
-                    tracing::warn!(code, "usn: read failed");
-                    return Err(api_error("FSCTL_READ_USN_JOURNAL"));
-                }
-
-                let (next, matched) = parse_events(&self.buf[..bytes as usize], REASON_MASK);
-                if bytes > 8 {
-                    tracing::trace!(
-                        bytes,
-                        matched = matched.len(),
-                        start_usn = self.next_usn,
-                        next_usn = next,
-                        "usn: read returned records"
-                    );
-                }
-                let Some(next) = next else {
-                    break; // header-less response: no data
-                };
-                let drained = bytes as usize <= 8;
-                let stalled = next == self.next_usn;
-                self.next_usn = next;
-                events.extend(matched);
-                if drained || stalled {
-                    break;
                 }
             }
             Ok(UsnPoll::Events(events))

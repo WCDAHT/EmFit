@@ -59,6 +59,12 @@ pub enum Error {
         sector_size: u32,
     },
 
+    /// A scan snapshot could not be trusted: corrupt, truncated, tampered
+    /// with, or written by a version that laid its sections out differently.
+    /// Never fatal - the caller scans the volume instead (`caching.md` sec 8).
+    #[error("cache file {path} is unusable: {reason}")]
+    CacheInvalid { path: PathBuf, reason: String },
+
     /// JSON (de)serialisation failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),

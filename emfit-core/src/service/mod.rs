@@ -5,6 +5,7 @@
 
 pub mod benchlog;
 pub mod breakdown;
+pub mod cache;
 pub mod case;
 pub mod config;
 pub mod elevation;
@@ -14,6 +15,7 @@ pub mod fold;
 pub mod logging;
 pub mod presets;
 pub mod query;
+pub mod replay;
 pub mod scan;
 pub mod search;
 pub mod task;

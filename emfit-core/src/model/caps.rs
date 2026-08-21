@@ -9,7 +9,10 @@
 //! See `architecture.md` sec 6.
 
 /// Capabilities of one scanned volume, declared by the scanner that read it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Serialized into a scan snapshot's manifest (`service::cache`), which is why
+// a capability that changes meaning needs a new field rather than a reused one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct VolumeCaps {
     /// Name comparison is case-sensitive. ext4 yes, NTFS no. Search uses this
     /// as its default; the user may override per query.
