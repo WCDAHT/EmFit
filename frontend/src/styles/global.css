@@ -69,3 +69,47 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
+
+/* Native form controls. color-scheme (theme.css) picks the palette for the
+ * parts the renderer paints itself; these cover the parts CSS can reach. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Only hook for the UA-drawn checkbox tick, range thumb and progress fill. */
+input,
+select,
+textarea,
+progress,
+meter {
+  accent-color: var(--accent);
+}
+
+/* The <select> popup is an OS-drawn list; put it on our menu surface. */
+option,
+optgroup {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* Keyboard focus only. The UA ring is system chrome, not ours. */
+:focus-visible {
+  outline: 2px solid var(--selection);
+  outline-offset: 1px;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled,
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -276,10 +276,6 @@
     font-size: var(--font-size-body);
     cursor: pointer;
   }
-  .toggle input {
-    accent-color: var(--accent);
-  }
-
   footer {
     display: flex;
     justify-content: flex-end;

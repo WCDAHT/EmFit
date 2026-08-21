@@ -16,6 +16,11 @@
  * palette) stays constant across modes, so it lives only in `:root`. */
 
 :root {
+  /* Palette for the control chrome the renderer paints itself (select
+   * popups, checkbox glyphs, progress track, scrollbars, caret). Not a
+   * token, and the only knob for it: flip it with the palette. */
+  color-scheme: dark;
+
   /* ---------------------------------------------------------------
    * SURFACES (background depth). Dark = warm grey-green (GitHub-dimmed
    * lineage); avoids pure black to prevent halation during long sessions.
@@ -161,6 +166,8 @@
  * inherited from :root unchanged.
  * --------------------------------------------------------------- */
 [data-theme="light"] {
+  color-scheme: light; /* keep control chrome in step; see :root */
+
   --surface: #ffffff;
   --surface-raised: #f6f8fa;
   --surface-sunken: #eaecef;

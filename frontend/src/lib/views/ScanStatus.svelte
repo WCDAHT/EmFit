@@ -105,7 +105,6 @@
   .chip progress {
     width: 120px;
     height: 8px;
-    accent-color: var(--accent);
   }
   .chip.error {
     border-color: var(--danger);
