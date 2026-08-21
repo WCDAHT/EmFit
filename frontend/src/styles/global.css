@@ -11,20 +11,20 @@
  * License text is surfaced in the About panel. See STANDARDS sec 2.5, sec 5.6. */
 @import "bootstrap-icons/font/bootstrap-icons.css";
 
-/* Bundle one font, self-hosted (STANDARDS sec 2.4). The .otf bytes are emitted
+/* Bundle one font, self-hosted (STANDARDS sec 2.4). The woff2 bytes are emitted
  * into dist/ by Vite and shipped inside the app - no system font dependency,
  * no runtime/CDN fetch. font-display: block avoids a fallback-font flash on
  * the first frame. */
 @font-face {
   font-family: "Inter";
-  src: url("../assets/fonts/Inter-Regular.otf") format("opentype");
+  src: url("../assets/fonts/Inter-Regular.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: block;
 }
 @font-face {
   font-family: "Inter";
-  src: url("../assets/fonts/Inter-SemiBold.otf") format("opentype");
+  src: url("../assets/fonts/Inter-SemiBold.woff2") format("woff2");
   font-weight: 600;
   font-style: normal;
   font-display: block;
