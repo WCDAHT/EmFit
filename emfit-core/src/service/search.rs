@@ -558,18 +558,27 @@ mod tests {
 
         // Substring, folded: "port" inside "Report.PDF".
         let query = parse(q("port"));
-        assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![(2, 6)]);
+        assert_eq!(
+            highlight_ranges("Report.PDF", &fold, false, &query),
+            vec![(2, 6)]
+        );
 
         // An ext: filter bolds the extension it selected.
         let query = parse(RawQuery {
             extensions: "pdf".to_string(),
             ..q("")
         });
-        assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![(7, 10)]);
+        assert_eq!(
+            highlight_ranges("Report.PDF", &fold, false, &query),
+            vec![(7, 10)]
+        );
 
         // `*.pdf` parses down to a suffix needle - the suffix highlights.
         let query = parse(q("*.pdf"));
-        assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![(6, 10)]);
+        assert_eq!(
+            highlight_ranges("Report.PDF", &fold, false, &query),
+            vec![(6, 10)]
+        );
 
         // True globs are anchored over the whole name: no highlight.
         let query = parse(q("r?port*"));
@@ -578,11 +587,17 @@ mod tests {
         // Ranges are UTF-16 units: e-acute is two UTF-8 bytes but one unit,
         // so "sum" in "resume.pdf" (accented) starts at unit 2, not byte 3.
         let query = parse(q("sum"));
-        assert_eq!(highlight_ranges("r\u{e9}sum\u{e9}.pdf", &fold, false, &query), vec![(2, 5)]);
+        assert_eq!(
+            highlight_ranges("r\u{e9}sum\u{e9}.pdf", &fold, false, &query),
+            vec![(2, 5)]
+        );
 
         // Overlapping contributions (semicolon multi-pattern) merge.
         let query = parse(q("repo;port"));
-        assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![(0, 6)]);
+        assert_eq!(
+            highlight_ranges("Report.PDF", &fold, false, &query),
+            vec![(0, 6)]
+        );
 
         // A name that only other rows matched gets nothing.
         let query = parse(q("zzz"));

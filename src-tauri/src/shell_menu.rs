@@ -153,11 +153,7 @@ mod windows_impl {
         unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     }
 
-    pub fn show(
-        hwnd: isize,
-        path: &str,
-        is_dir: bool,
-    ) -> windows::core::Result<super::MenuAction> {
+    pub fn show(hwnd: isize, path: &str, is_dir: bool) -> windows::core::Result<super::MenuAction> {
         let hwnd = HWND(hwnd as *mut core::ffi::c_void);
 
         // The main thread is already an STA (WebView2 requires it); this is

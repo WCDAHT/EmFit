@@ -130,8 +130,7 @@ fn parse_events(buf: &[u8], reason_mask: u32) -> (Option<i64>, Vec<UsnEvent>) {
         }
         let major = u16::from_le_bytes(buf[at + 4..at + 6].try_into().expect("2-byte slice"));
         if major == 2 {
-            let frn =
-                u64::from_le_bytes(buf[at + 8..at + 16].try_into().expect("8-byte slice"));
+            let frn = u64::from_le_bytes(buf[at + 8..at + 16].try_into().expect("8-byte slice"));
             let parent_frn =
                 u64::from_le_bytes(buf[at + 16..at + 24].try_into().expect("8-byte slice"));
             let reason =

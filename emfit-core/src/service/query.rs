@@ -414,10 +414,7 @@ mod tests {
             "\u{43f}\u{440} ext:pdf",
         ] {
             let q = parse_text(text);
-            assert!(
-                !q.patterns.is_empty(),
-                "`{text}` should produce a pattern"
-            );
+            assert!(!q.patterns.is_empty(), "`{text}` should produce a pattern");
         }
         let q = parse_text("\u{43f}\u{440} ext:pdf");
         assert_eq!(q.extensions, vec!["pdf".to_string()]);

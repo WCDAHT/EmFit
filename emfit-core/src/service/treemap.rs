@@ -960,10 +960,7 @@ mod tests {
 
         // sec 5.4: the child area shrinks to {x+2, y+(minLabelH+1), w-4,
         // h-(minLabelH+2)} BEFORE squarify, so no child can occupy the strip.
-        let children: Vec<_> = rects
-            .iter()
-            .filter(|r| r.depth == docs.depth + 1)
-            .collect();
+        let children: Vec<_> = rects.iter().filter(|r| r.depth == docs.depth + 1).collect();
         let top = children.iter().map(|r| r.y).fold(f32::MAX, f32::min);
         let left = children.iter().map(|r| r.x).fold(f32::MAX, f32::min);
         assert!(

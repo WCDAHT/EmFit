@@ -21,9 +21,7 @@ use std::collections::HashSet;
 
 use emfit_core::model::index::Index;
 use emfit_core::service::task::CancellationToken;
-use emfit_core::service::usn::{
-    REASON_FILE_DELETE, REASON_RENAME_NEW_NAME, UsnPoll, UsnWatcher,
-};
+use emfit_core::service::usn::{REASON_FILE_DELETE, REASON_RENAME_NEW_NAME, UsnPoll, UsnWatcher};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::dto::{UsnDeletedDto, UsnGapDto};
@@ -149,7 +147,11 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
     // sides must be compared at 48 bits.
     let by_native: HashMap<u64, u32> = index
         .ids()
-        .filter_map(|id| index.native_id(id).map(|native| (native & RECORD_MASK, id.get())))
+        .filter_map(|id| {
+            index
+                .native_id(id)
+                .map(|native| (native & RECORD_MASK, id.get()))
+        })
         .collect();
 
     // Plain Del is a RENAME into `$Recycle.Bin\<SID>\`, not a delete - the
@@ -238,7 +240,10 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
                 }
             }
             Ok(UsnPoll::Gap) => {
-                tracing::warn!(key, "usn journal gap; deletion marks incomplete until rescan");
+                tracing::warn!(
+                    key,
+                    "usn journal gap; deletion marks incomplete until rescan"
+                );
                 let _ = app.emit(
                     "usn:gap",
                     UsnGapDto {
