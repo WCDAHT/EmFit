@@ -2,7 +2,7 @@
 //!
 //! `FSCTL_GET_RETRIEVAL_POINTERS` returns a file's extent map. It is the fast
 //! path for locating the MFT: no parsing, no bootstrap, one ioctl. When it is
-//! unavailable — a raw image, an unmounted volume, no rights to open `$MFT` —
+//! unavailable - a raw image, an unmounted volume, no rights to open `$MFT` -
 //! the caller falls back to decoding record 0's `$DATA` run list, which
 //! reaches the same answer the slow way.
 //!
@@ -165,7 +165,7 @@ mod windows_impl {
 
     /// Open `$MFT` for its metadata only.
     ///
-    /// `FILE_READ_ATTRIBUTES` alone is enough for this ioctl — the file's
+    /// `FILE_READ_ATTRIBUTES` alone is enough for this ioctl - the file's
     /// *contents* are never read through this handle, only its extent map, so
     /// no read access is requested.
     fn open_mft(drive_letter: char) -> Result<std::fs::File> {

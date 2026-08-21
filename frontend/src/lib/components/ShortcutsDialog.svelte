@@ -1,7 +1,7 @@
 <!--
-  ShortcutsDialog.svelte — the F1 "Keyboard shortcuts" help dialog.
+  ShortcutsDialog.svelte - the F1 "Keyboard shortcuts" help dialog.
 
-  STANDARDS §3.7: every shortcut must be discoverable, both on the control that
+  STANDARDS sec 3.7: every shortcut must be discoverable, both on the control that
   invokes it and in a Keyboard Shortcuts help dialog. This is that dialog. Keep
   the list in step with the handlers wired in App.svelte. Esc closes it (the
   dialog owns its own close key, like About.svelte).

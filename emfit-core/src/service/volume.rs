@@ -2,7 +2,7 @@
 //!
 //! Produces [`VolumeInfo`] for every volume Windows knows about, including
 //! those with no drive letter and those mounted into a directory. The physical
-//! location — which disk, which offset — comes from
+//! location - which disk, which offset - comes from
 //! `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`, and is what lets a scanner open
 //! `\\.\PhysicalDriveN` and read past the filesystem driver entirely.
 //!
@@ -17,7 +17,7 @@
 //! The workspace denies `unsafe_code`; this module overrides it, because these
 //! ioctls have no `std` equivalent. Every block is small, wraps exactly one
 //! call, and is preceded by why it is sound. Nothing else in the engine needs
-//! this — raw device *reads* go through `std`'s positional file APIs (see
+//! this - raw device *reads* go through `std`'s positional file APIs (see
 //! [`crate::parser::block`]).
 
 use crate::error::Result;
@@ -25,8 +25,8 @@ use crate::model::volume::VolumeInfo;
 
 /// Every volume on this machine, in the order the OS reports them.
 ///
-/// Volumes that cannot be interrogated — a card reader with no card, a
-/// disconnected network drive — are skipped rather than failing the whole
+/// Volumes that cannot be interrogated - a card reader with no card, a
+/// disconnected network drive - are skipped rather than failing the whole
 /// enumeration, so one bad device does not hide the rest.
 pub fn enumerate() -> Result<Vec<VolumeInfo>> {
     #[cfg(windows)]
@@ -71,11 +71,11 @@ mod windows_impl {
     use crate::error::{Error, Result};
     use crate::model::volume::{FilesystemKind, PartitionLocation, VolumeInfo};
 
-    /// `\\?\Volume{…}\` is 49 characters; the documented buffer size is 50.
+    /// `\\?\Volume{...}\` is 49 characters; the documented buffer size is 50.
     const VOLUME_NAME_LEN: usize = 64;
 
     /// `CTL_CODE(IOCTL_VOLUME_BASE, 0, METHOD_BUFFERED, FILE_ANY_ACCESS)`,
-    /// where `IOCTL_VOLUME_BASE` is `'V'` — so `(0x56 << 16) | 0`.
+    /// where `IOCTL_VOLUME_BASE` is `'V'` - so `(0x56 << 16) | 0`.
     ///
     /// Spelled out because `windows-rs` does not generate the volume ioctl
     /// codes; they are macro expansions in the SDK headers, not constants.
@@ -118,8 +118,8 @@ mod windows_impl {
     }
 
     /// Gather everything about one volume. Returns `None` when the volume
-    /// cannot be interrogated at all — an empty card reader, a disconnected
-    /// network drive — so one dead device does not hide the others.
+    /// cannot be interrogated at all - an empty card reader, a disconnected
+    /// network drive - so one dead device does not hide the others.
     fn describe(guid_path: &str) -> Option<VolumeInfo> {
         let wide = to_wide(guid_path);
         let root = PCWSTR(wide.as_ptr());
@@ -184,7 +184,7 @@ mod windows_impl {
         })
     }
 
-    /// Every path this volume is reachable through — drive letters and
+    /// Every path this volume is reachable through - drive letters and
     /// directories it is mounted into.
     fn mount_points(root: PCWSTR) -> Vec<String> {
         let mut buf = vec![0u16; 512];
@@ -231,8 +231,8 @@ mod windows_impl {
         // `CreateFile` rejects a volume path with its trailing separator.
         let device = guid_path.trim_end_matches('\\');
 
-        // Zero desired access is enough for this ioctl, and — unlike
-        // GENERIC_READ — needs no Administrator rights. So partition offsets
+        // Zero desired access is enough for this ioctl, and - unlike
+        // GENERIC_READ - needs no Administrator rights. So partition offsets
         // are discoverable before the user elevates.
         let handle = OpenOptions::new()
             .access_mode(0)

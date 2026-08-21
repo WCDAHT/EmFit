@@ -1,4 +1,4 @@
-//! Tauri shell entry point. See STANDARDS Â§3 for the shellâ†”core boundary,
+//! Tauri shell entry point. See STANDARDS sec 3 for the shell<->core boundary,
 //! command wiring, and the async/event pattern.
 //!
 //! This crate is deliberately thin: it owns window setup, plugin
@@ -25,8 +25,8 @@ pub use error::CommandError;
 /// generated mobile entry point on iOS/Android.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // STANDARDS Â§4.2: tracing from day one, into a detailed plain-text log file
-    // under appdata (see `emfit_core::service::logging`). Best-effort â€” falls
+    // STANDARDS sec 4.2: tracing from day one, into a detailed plain-text log file
+    // under appdata (see `emfit_core::service::logging`). Best-effort - falls
     // back to stdout-only if the log directory can't be created.
     let log_dir = logging::init();
 
@@ -37,26 +37,26 @@ pub fn run() {
     );
 
     // Load persisted settings once at startup; commands serve and mutate this
-    // in-memory copy and write changes through to disk (STANDARDS Â§3.3/Â§4.4).
+    // in-memory copy and write changes through to disk (STANDARDS sec 3.3/sec 4.4).
     let config: Mutex<Config> = Mutex::new(Config::load());
 
     tauri::Builder::default()
         .manage(config)
         // Scanned indexes and the current search view (state::AppState). The
-        // Rust side owns truth; the webview projects it (STANDARDS §3.3).
+        // Rust side owns truth; the webview projects it (STANDARDS sec 3.3).
         .manage(state::AppState::new())
         // Plugins expose capability-gated APIs to the webview. `opener` opens
         // URLs/paths in the OS default handler; `dialog` is the native
         // open/save file picker (replaces a hand-rolled chooser). Grant their
-        // permissions in `capabilities/default.json`. See STANDARDS Â§3.6.
+        // permissions in `capabilities/default.json`. See STANDARDS sec 3.6.
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        // Native window menu instead of an in-app header — every pixel of the
+        // Native window menu instead of an in-app header - every pixel of the
         // window belongs to the data. Items the webview must react to are
         // forwarded as a `menu` event; the frontend switches on the id.
         .setup(|app| {
             let file = SubmenuBuilder::new(app, "File")
-                .text("sources", "Scan sources…")
+                .text("sources", "Scan sources...")
                 .text("rescan", "Rescan\tF5")
                 .text("cancel_scan", "Cancel scan\tEsc")
                 .separator()
@@ -64,7 +64,7 @@ pub fn run() {
                 .build()?;
             let view = SubmenuBuilder::new(app, "View")
                 .text("toggle_theme", "Toggle light/dark")
-                .text("settings", "Settings…")
+                .text("settings", "Settings...")
                 .build()?;
             let help = SubmenuBuilder::new(app, "Help")
                 .text("shortcuts", "Keyboard shortcuts\tF1")
@@ -83,8 +83,8 @@ pub fn run() {
             }
         })
         // Every app command the webview may call must be listed here. Unlike
-        // plugin/core commands (gated by capabilities, Â§3.6), your own
-        // commands need no permission entry â€” registering them is enough.
+        // plugin/core commands (gated by capabilities, sec 3.6), your own
+        // commands need no permission entry - registering them is enough.
         .invoke_handler(tauri::generate_handler![
             commands::log_event,
             commands::get_config,

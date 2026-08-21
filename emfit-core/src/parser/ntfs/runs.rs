@@ -1,6 +1,6 @@
 //! Data runs: how NTFS records where a file's clusters actually are.
 //!
-//! A non-resident attribute stores its content as a *run list* — a compact
+//! A non-resident attribute stores its content as a *run list* - a compact
 //! sequence of (length, offset) pairs, each offset a **signed delta** from the
 //! previous run's start. Decoding it is how the MFT's own extent map is
 //! recovered when the filesystem driver will not hand it over (a raw image, or
@@ -11,7 +11,7 @@
 /// One run of clusters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DataRun {
-    /// First cluster on disk, or `None` for a sparse run — a hole that
+    /// First cluster on disk, or `None` for a sparse run - a hole that
     /// occupies no space and reads as zeroes.
     pub lcn: Option<u64>,
     /// Length of the run in clusters.
@@ -28,7 +28,7 @@ impl DataRun {
 /// Decode a run list.
 ///
 /// Stops at the terminating zero byte, at the end of the buffer, or at the
-/// first malformed header — returning what was decoded so far rather than
+/// first malformed header - returning what was decoded so far rather than
 /// failing, because a partial run list still locates the beginning of the
 /// file, and for `$MFT` that is enough to bootstrap.
 ///
@@ -65,7 +65,7 @@ pub fn decode(buf: &[u8]) -> (Vec<DataRun>, bool) {
 
         if off_size == 0 {
             // Sparse: no offset field at all, and the running LCN does not
-            // advance — the next run's delta is still relative to the last
+            // advance - the next run's delta is still relative to the last
             // *allocated* run.
             runs.push(DataRun {
                 lcn: None,
@@ -113,7 +113,7 @@ impl RunSummary {
 /// Sum a run list's allocated and hole clusters, allocation-free.
 ///
 /// The sweep calls this for every non-resident stream, so unlike [`decode`]
-/// it builds nothing — one pass over the bytes, two counters. Same
+/// it builds nothing - one pass over the bytes, two counters. Same
 /// tolerance for truncation: a malformed tail yields what was summed.
 pub fn summarize(buf: &[u8]) -> RunSummary {
     let mut summary = RunSummary::default();
@@ -144,7 +144,7 @@ pub fn summarize(buf: &[u8]) -> RunSummary {
     summary
 }
 
-/// Little-endian unsigned integer of 1–8 bytes.
+/// Little-endian unsigned integer of 1-8 bytes.
 fn read_unsigned(bytes: &[u8]) -> u64 {
     let mut value = 0u64;
     for (i, &b) in bytes.iter().enumerate() {
@@ -153,7 +153,7 @@ fn read_unsigned(bytes: &[u8]) -> u64 {
     value
 }
 
-/// Little-endian **signed** integer of 1–8 bytes, sign-extended from its top
+/// Little-endian **signed** integer of 1-8 bytes, sign-extended from its top
 /// bit. Run offsets go backwards as often as forwards.
 fn read_signed(bytes: &[u8]) -> i64 {
     let mut value = read_unsigned(bytes);
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn offsets_accumulate_across_runs() {
         // Three runs, each offset relative to the one before:
-        //   +0x0100 → 0x0100, +0x0010 → 0x0110, +0x0020 → 0x0130
+        //   +0x0100 -> 0x0100, +0x0010 -> 0x0110, +0x0020 -> 0x0130
         let (runs, complete) = decode(&[
             0x21, 0x08, 0x00, 0x01, // 8 clusters @ 0x0100
             0x21, 0x04, 0x10, 0x00, // 4 clusters @ 0x0110
@@ -204,12 +204,12 @@ mod tests {
 
     #[test]
     fn offsets_can_go_backwards() {
-        // The second run sits *before* the first on disk — ordinary on a
+        // The second run sits *before* the first on disk - ordinary on a
         // fragmented volume, and wrong by 0x200 clusters if the delta is read
         // as unsigned.
         let (runs, complete) = decode(&[
             0x21, 0x08, 0x00, 0x02, // 8 clusters @ 0x0200
-            0x21, 0x04, 0x00, 0xFF, // delta -0x0100 → 0x0100
+            0x21, 0x04, 0x00, 0xFF, // delta -0x0100 -> 0x0100
             0x00,
         ]);
 
@@ -222,7 +222,7 @@ mod tests {
     fn single_byte_offsets_sign_extend() {
         let (runs, _) = decode(&[
             0x11, 0x08, 0x40, // 8 clusters @ 0x40
-            0x11, 0x04, 0xF0, // delta -16 → 0x30
+            0x11, 0x04, 0xF0, // delta -16 -> 0x30
             0x00,
         ]);
         assert_eq!(runs[0].lcn, Some(0x40));

@@ -1,7 +1,7 @@
 //! What was found on this machine, before anything is read.
 //!
 //! Discovery answers questions the byte layer cannot: which volumes exist,
-//! what filesystem each holds, and — for raw access — *where on which physical
+//! what filesystem each holds, and - for raw access - *where on which physical
 //! disk* each one starts. A [`BlockSource`] can read `\\.\PhysicalDrive0`, but
 //! only [`PartitionLocation`] says that `C:` begins 105 MB into it.
 //!
@@ -22,13 +22,13 @@ pub enum FilesystemKind {
     Fat32,
     ExFat,
     ReFs,
-    /// Recognized by name but with no scanner of its own — ext4 on a mounted
+    /// Recognized by name but with no scanner of its own - ext4 on a mounted
     /// image, a network redirector, anything unexpected.
     Other(String),
 }
 
 impl FilesystemKind {
-    /// Classify the OS's filesystem name (`"NTFS"`, `"FAT32"`, …).
+    /// Classify the OS's filesystem name (`"NTFS"`, `"FAT32"`, ...).
     pub fn from_name(name: &str) -> Self {
         match name.trim().to_ascii_uppercase().as_str() {
             "NTFS" => Self::Ntfs,
@@ -80,11 +80,11 @@ impl PartitionLocation {
 /// One volume found on this machine.
 #[derive(Debug, Clone)]
 pub struct VolumeInfo {
-    /// Stable device path, `\\?\Volume{…}` form. Present even when the volume
+    /// Stable device path, `\\?\Volume{...}` form. Present even when the volume
     /// has no drive letter.
     pub guid_path: String,
     /// Every path the volume is reachable through: drive letters like `C:\`
-    /// and directories it is mounted into. May be empty — a volume can exist
+    /// and directories it is mounted into. May be empty - a volume can exist
     /// with no mount point at all.
     pub mount_points: Vec<String>,
     /// User-assigned volume label, when set.
@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(
             v.device_path(),
             r"\\?\Volume{11111111-2222-3333-4444-555555555555}",
-            "the trailing separator must go — CreateFile rejects it"
+            "the trailing separator must go - CreateFile rejects it"
         );
         assert_eq!(v.device_path(), v.guid_path.trim_end_matches('\\'));
     }

@@ -49,8 +49,8 @@ pub trait Exporter<Document> {
 
     /// Write `doc` to `dest`. Implementations should:
     ///
-    /// - Write to a temp file and atomically rename on success — use
-    ///   [`write_atomic`] (STANDARDS §4.5).
+    /// - Write to a temp file and atomically rename on success - use
+    ///   [`write_atomic`] (STANDARDS sec 4.5).
     /// - Surface errors with enough context that the UI can show what failed.
     /// - Be re-entrant: no global state.
     /// - Poll `cancel` during long in-memory builds (large documents take
@@ -60,7 +60,7 @@ pub trait Exporter<Document> {
 }
 
 /// Write `bytes` to `dest` atomically: stream to a sibling `*.tmp`, fsync, then
-/// rename over the target (STANDARDS §4.5). A crash mid-write leaves any prior
+/// rename over the target (STANDARDS sec 4.5). A crash mid-write leaves any prior
 /// file intact rather than a half-written document. Shared by every exporter so
 /// the durability discipline lives in one place.
 pub fn write_atomic(dest: &Path, bytes: &[u8]) -> Result<()> {

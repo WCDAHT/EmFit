@@ -1,6 +1,6 @@
 <!--
-  StatusBar.svelte — object count, selection count and total, volume total
-  (features.md §3). The selection total is the number users select things to
+  StatusBar.svelte - object count, selection count and total, volume total
+  (features.md sec 3). The selection total is the number users select things to
   learn: "how much would deleting this free up".
 -->
 <script lang="ts">
@@ -14,7 +14,7 @@
 <div class="status">
   <span>{objects} objects</span>
   {#if selected > 0}
-    <span class="sep">·</span>
+    <span class="sep">|</span>
     <span>
       {selected.toLocaleString()} selected{#if session.summary}
         &nbsp;({formatSize(session.summary.bytes)}, {formatSize(session.summary.allocated)} on disk){/if}

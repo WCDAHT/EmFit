@@ -1,6 +1,6 @@
 /* Global base styles. Imported once from src/main.ts before the app mounts.
  * Pulls in the design tokens, self-hosts the Inter font, and registers the
- * Bootstrap Icons webfont. See STANDARDS §2. */
+ * Bootstrap Icons webfont. See STANDARDS sec 2. */
 
 @import "./theme.css";
 
@@ -8,11 +8,11 @@
  * `bi bi-<name>` classes in Icon.svelte) and the raw SVGs (for Svelte Flow
  * custom nodes or anywhere you need to recolor/animate a glyph). Only this
  * one webfont file is bundled; individual SVG imports are tree-shaken.
- * License text is surfaced in the About panel. See STANDARDS §2.5, §5.6. */
+ * License text is surfaced in the About panel. See STANDARDS sec 2.5, sec 5.6. */
 @import "bootstrap-icons/font/bootstrap-icons.css";
 
-/* Bundle one font, self-hosted (STANDARDS §2.4). The .otf bytes are emitted
- * into dist/ by Vite and shipped inside the app — no system font dependency,
+/* Bundle one font, self-hosted (STANDARDS sec 2.4). The .otf bytes are emitted
+ * into dist/ by Vite and shipped inside the app - no system font dependency,
  * no runtime/CDN fetch. font-display: block avoids a fallback-font flash on
  * the first frame. */
 @font-face {

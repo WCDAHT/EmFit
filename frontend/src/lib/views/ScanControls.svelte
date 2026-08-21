@@ -1,9 +1,9 @@
 <!--
-  ScanControls.svelte — the Sources popup and the Scan/Cancel button.
+  ScanControls.svelte - the Sources popup and the Scan/Cancel button.
 
   The scan list is managed, not toggled: the popup shows what will be
-  scanned (each entry removable with ×) and what could be added (each
-  volume with +, plus "Add disk image…" for your own). Native volumes all
+  scanned (each entry removable with x) and what could be added (each
+  volume with +, plus "Add disk image..." for your own). Native volumes all
   appear by default; only C: starts on the list.
 -->
 <script lang="ts">
@@ -41,7 +41,7 @@
       for (const t of session.targets) {
         session.scan[t.key] = {
           phase: "scanning",
-          message: "Starting…",
+          message: "Starting...",
           done: 0,
           total: null,
         };
@@ -120,7 +120,7 @@
       <div class="section">
         <div class="heading">Scan list</div>
         {#if session.targets.length === 0}
-          <div class="hint">Nothing yet — add a volume below.</div>
+          <div class="hint">Nothing yet - add a volume below.</div>
         {/if}
         {#each session.targets as t (t.key)}
           <div class="entry">
@@ -146,7 +146,7 @@
             <span class="label">
               {v.name}
               <span class="detail">
-                {v.label ?? v.filesystem} · {formatSize(v.free_bytes)} free of {formatSize(v.total_bytes)}
+                {v.label ?? v.filesystem} | {formatSize(v.free_bytes)} free of {formatSize(v.total_bytes)}
               </span>
             </span>
             <button
@@ -165,7 +165,7 @@
 
       <button class="add-image" disabled={session.scanning} onclick={() => void addImage()}>
         <Icon name="folder2-open" />
-        Add disk image…
+        Add disk image...
       </button>
     </div>
   {/if}

@@ -1,12 +1,12 @@
-//! Verification CLI — a thin binary over `emfit-core` (roadmap M1).
+//! Verification CLI - a thin binary over `emfit-core` (roadmap M1).
 //!
 //! Just enough surface to test the engine without a UI: list volumes, scan
 //! one, print the raw counters, dump a single MFT record, print a size tree.
-//! The full CLI of features.md §10 (search, largest, export, monitor, stable
+//! The full CLI of features.md sec 10 (search, largest, export, monitor, stable
 //! machine-readable output) waits for M6; nothing here is a stability promise.
 //!
 //! Every command that reads a volume also accepts `--image FILE`, which works
-//! on any platform and needs no elevation — that is how the fixture images in
+//! on any platform and needs no elevation - that is how the fixture images in
 //! `emfit-core/tests/` and evidence images in the field are exercised.
 
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ use emfit_core::service::task::{CancellationToken, Progress};
 use emfit_core::service::{benchlog, elevation, scan, volume};
 
 const USAGE: &str = "\
-EmFit verification CLI (M1) — see features.md §10 for the eventual full surface
+EmFit verification CLI (M1) - see features.md sec 10 for the eventual full surface
 
 Usage:
   emfit-cli volumes
@@ -95,7 +95,7 @@ fn main() -> ExitCode {
 // ---------------------------------------------------------------------------
 
 /// What can follow a command. Hand-rolled: five flags do not justify a
-/// dependency (STANDARDS §5.7).
+/// dependency (STANDARDS sec 5.7).
 #[derive(Debug, Default)]
 struct CliArgs {
     drive: Option<char>,
@@ -222,7 +222,7 @@ fn cmd_volumes() -> Result<()> {
         );
     }
     if !elevation::is_elevated() {
-        eprintln!("\nnote: not elevated — scans of these volumes will be refused");
+        eprintln!("\nnote: not elevated - scans of these volumes will be refused");
     }
     Ok(())
 }
@@ -305,7 +305,7 @@ fn cmd_tree_size(args: &CliArgs) -> Result<()> {
     Ok(())
 }
 
-/// Directories first, largest allocation first — the WizTree ordering.
+/// Directories first, largest allocation first - the WizTree ordering.
 fn print_tree(index: &Index, id: NodeId, depth: usize, max_depth: usize, top: usize) {
     let node = index.node(id);
     let name = if id == index.root() {
@@ -342,7 +342,7 @@ fn print_tree(index: &Index, id: NodeId, depth: usize, max_depth: usize, top: us
     }
     if children.len() > shown {
         println!(
-            "{:indent$}… {} more directories",
+            "{:indent$}... {} more directories",
             "",
             children.len() - shown,
             indent = (depth + 1) * 2
@@ -367,7 +367,7 @@ fn cmd_read_mft(args: &CliArgs) -> Result<()> {
     let layout = bootstrap::probe(&source)?;
     let record_size = layout.boot.bytes_per_record as usize;
     println!(
-        "mode {} · {} fragments · {} records to scan · {} bytes/record",
+        "mode {} | {} fragments | {} records to scan | {} bytes/record",
         mode.as_str(),
         layout.extents.fragment_count(),
         layout.records_to_scan(),
@@ -399,7 +399,7 @@ fn cmd_read_mft(args: &CliArgs) -> Result<()> {
     );
     let header = RecordHeader::parse(record_bytes)?;
     println!(
-        "  signature ok · in use: {} · directory: {} · links: {} · sequence: {}",
+        "  signature ok | in use: {} | directory: {} | links: {} | sequence: {}",
         header.is_in_use(),
         header.is_directory(),
         header.hard_link_count,
@@ -409,7 +409,7 @@ fn cmd_read_mft(args: &CliArgs) -> Result<()> {
         println!("  extension record of base {base}");
     }
     println!(
-        "  used {} of {} bytes · first attribute at {:#x}",
+        "  used {} of {} bytes | first attribute at {:#x}",
         header.used_size, header.allocated_size, header.first_attribute_offset
     );
 
@@ -423,7 +423,7 @@ fn cmd_read_mft(args: &CliArgs) -> Result<()> {
         };
         if let Some(nr) = attribute.non_resident() {
             println!(
-                "  [{i}] {name}{stream} non-resident · vcn {}..{} · size {} · allocated {} · physical {}",
+                "  [{i}] {name}{stream} non-resident | vcn {}..{} | size {} | allocated {} | physical {}",
                 nr.starting_vcn(),
                 nr.last_vcn(),
                 nr.data_size(),
@@ -432,13 +432,13 @@ fn cmd_read_mft(args: &CliArgs) -> Result<()> {
             );
         } else {
             let len = attribute.resident_value().map(<[u8]>::len).unwrap_or(0);
-            println!("  [{i}] {name}{stream} resident · {len} bytes");
+            println!("  [{i}] {name}{stream} resident | {len} bytes");
             if attribute.kind() == AttributeType::FileName
                 && let Some(value) = attribute.resident_value()
                 && let Some(fname) = emfit_core::parser::ntfs::FileName::parse(value)
             {
                 println!(
-                    "        name `{}` · parent {} · namespace {:?} · fn-size {}",
+                    "        name `{}` | parent {} | namespace {:?} | fn-size {}",
                     fname.to_name(),
                     fname.parent_record(),
                     fname.namespace(),

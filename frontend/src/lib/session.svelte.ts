@@ -1,8 +1,8 @@
-// Cross-view shared state (STANDARDS §3.3): the search bar, file list, scan
+// Cross-view shared state (STANDARDS sec 3.3): the search bar, file list, scan
 // bar, and status bar all read and write this one runed module instead of
 // threading props through the tree.
 //
-// This is a *projection* of what the Rust side knows — the shell owns truth.
+// This is a *projection* of what the Rust side knows - the shell owns truth.
 // Query fields here are just what the inputs hold; pushing them through
 // `set_query` is what makes them real, and the `view:updated` event is what
 // updates the result metadata.
@@ -65,7 +65,7 @@ export const session = $state({
   allSelected: false,
   summary: null as SelectionSummaryDto | null,
 
-  // --- tree view (features.md §4) ---
+  // --- tree view (features.md sec 4) ---
   /** Treemap drill point; null = all volumes in one map. */
   drill: null as NodeRef | null,
   /** The focused node, shared by the folder tree and the treemap. */
@@ -82,22 +82,22 @@ export const session = $state({
    *  off by default). */
   showFreeSpace: false,
   /** Nodes the USN watcher observed deleted since the last scan, as
-   *  `"vol:id"` keys (M5). Marks only — red border in the treemap, flagged
-   *  rows elsewhere — cleared wholesale on any successful scan, because
+   *  `"vol:id"` keys (M5). Marks only - red border in the treemap, flagged
+   *  rows elsewhere - cleared wholesale on any successful scan, because
    *  rescans can shift volume slots and always restart the watchers. */
   deletedNodes: new SvelteSet<string>(),
   /** How every byte count renders (config-persisted): "dynamic" picks the
-   *  largest unit ≥ 1; anything else is a fixed unit. Consumed exclusively
+   *  largest unit >= 1; anything else is a fixed unit. Consumed exclusively
    *  through `formatSize` in lib/format.ts. */
   sizeUnit: "dynamic" as import("./format").SizeUnit,
-  /** Bumped by `theme.ts` when the theme actually changes — the repaint
+  /** Bumped by `theme.ts` when the theme actually changes - the repaint
    *  signal for canvas surfaces, which resolve CSS variables themselves. */
   themeEpoch: 0,
   /** Fixed height of the treemap row, set by the splitter on drag release;
    *  null = the default flex split. */
   treemapHeight: null as number | null,
   /** Show logical size or size on disk as the primary number. The treemap's
-   *  geometry always uses allocated (features.md §4.2). */
+   *  geometry always uses allocated (features.md sec 4.2). */
   sizeMode: "allocated" as "allocated" | "logical",
   /** Extensions ticked in the type breakdown; dims the treemap and feeds the
    *  list's extension filter. */
@@ -126,7 +126,7 @@ export function removeTarget(key: string) {
 }
 
 /** Imperative hooks views register so root-level shortcuts can reach them
- *  (STANDARDS §3.7: all shortcuts dispatched from the app root). */
+ *  (STANDARDS sec 3.7: all shortcuts dispatched from the app root). */
 export const hooks: {
   focusSearch?: () => void;
   rescan?: () => void;
@@ -152,7 +152,7 @@ function rawQuery(): RawQueryDto {
 
 let queryTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Push the query after a short debounce — the Rust search is interruptible,
+/** Push the query after a short debounce - the Rust search is interruptible,
  *  but not starting a doomed search at all is cheaper still. */
 export function queryChanged(immediate = false) {
   clearTimeout(queryTimer);
@@ -163,8 +163,8 @@ export function queryChanged(immediate = false) {
   }
 }
 
-/** True when anything beyond plain text constrains the view — drives the
- *  "filters active" indicator (features.md §2). */
+/** True when anything beyond plain text constrains the view - drives the
+ *  "filters active" indicator (features.md sec 2). */
 export function filtersActive(): boolean {
   return (
     session.regex !== "" ||
@@ -178,7 +178,7 @@ export function filtersActive(): boolean {
   );
 }
 
-/** The "clear all filters" action. Keeps the text — clearing what the user
+/** The "clear all filters" action. Keeps the text - clearing what the user
  *  is actively typing would be hostile. */
 export function clearFilters() {
   session.regex = "";
@@ -263,7 +263,7 @@ export function isSelected(row: number): boolean {
 
 let summaryTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Ask Rust for the selection totals, debounced — shift-drag selection would
+/** Ask Rust for the selection totals, debounced - shift-drag selection would
  *  otherwise fire a summary per row. */
 export function refreshSummary() {
   clearTimeout(summaryTimer);

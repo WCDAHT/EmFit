@@ -1,13 +1,13 @@
 //! Executing a [`Query`] against one or more indexes.
 //!
-//! One linear pass over the flat node array per volume — no tree walk, no
+//! One linear pass over the flat node array per volume - no tree walk, no
 //! per-name allocation. Pattern needles are folded **once per volume** (case
-//! rules are per-volume, features.md §2); every candidate name is then folded
+//! rules are per-volume, features.md sec 2); every candidate name is then folded
 //! on the fly against the arena slice.
 //!
 //! Interruptible: the pass checks a [`CancellationToken`] every few thousand
 //! nodes, so an in-flight search abandons quickly when the next keystroke
-//! arrives (features.md §2 "incremental / debounced search").
+//! arrives (features.md sec 2 "incremental / debounced search").
 
 use rayon::prelude::*;
 
@@ -22,7 +22,7 @@ use crate::service::task::CancellationToken;
 /// One search result: which volume slot, which node.
 pub type Hit = (u16, NodeId);
 
-/// Nodes per parallel work unit — also the cancellation granularity.
+/// Nodes per parallel work unit - also the cancellation granularity.
 const CHUNK: usize = 8192;
 
 /// Search one volume, appending hits to `out` in node order.
@@ -167,7 +167,7 @@ struct Prepared<'q> {
 }
 
 impl<'q> Prepared<'q> {
-    /// `None` when a path scope is set but absent from this volume — the
+    /// `None` when a path scope is set but absent from this volume - the
     /// whole volume is out of scope.
     fn build(index: &Index, fold: &CaseFold, query: &'q Query) -> Option<Self> {
         let case_sensitive = query.case_sensitive.unwrap_or(index.caps().case_sensitive);
@@ -229,7 +229,7 @@ impl<'q> Prepared<'q> {
         }
 
         if let Some((lo, hi)) = q.size {
-            // Directories filter on their subtree total — "show me what's
+            // Directories filter on their subtree total - "show me what's
             // over a gigabyte" should surface the folders too.
             let size = if node.is_directory() {
                 node.total_size()
@@ -303,14 +303,14 @@ impl<'q> Prepared<'q> {
     }
 }
 
-/// The spans of `name` that made the query match — for the result list to
+/// The spans of `name` that made the query match - for the result list to
 /// bold. Ranges are **UTF-16 code-unit offsets** (merged, non-overlapping,
 /// in order), so the webview can slice its strings directly.
 ///
 /// Covered: substring/prefix/suffix needles (first occurrence each, under
 /// the same per-volume folding the matcher uses), the regex's first find,
 /// and the extension when an `ext:` filter selected it. Globs contribute
-/// nothing — they are anchored over the whole name, and bolding an entire
+/// nothing - they are anchored over the whole name, and bolding an entire
 /// row is noise, not information.
 ///
 /// Meant for the visible row window (~dozens of names), not the full
@@ -323,7 +323,7 @@ pub fn highlight_ranges(
 ) -> Vec<(u32, u32)> {
     let case_sensitive = query.case_sensitive.unwrap_or(volume_case_sensitive);
 
-    // The name's chars with byte offsets, folded unless case-sensitive —
+    // The name's chars with byte offsets, folded unless case-sensitive -
     // folding is 1:1 per char, so positions line up with the raw name.
     let chars: Vec<(usize, char)> = name
         .char_indices()
@@ -491,11 +491,11 @@ mod tests {
     /// A small volume:
     /// ```text
     /// C:\
-    /// ├── Users\            (dir)
-    /// │   ├── Report.PDF    2 MiB
-    /// │   └── notes.txt     10 B, hidden
-    /// ├── pagefile.sys      4 GiB, system
-    /// └── Setup.exe         50 MiB
+    /// +-- Users\            (dir)
+    /// |   +-- Report.PDF    2 MiB
+    /// |   +-- notes.txt     10 B, hidden
+    /// +-- pagefile.sys      4 GiB, system
+    /// +-- Setup.exe         50 MiB
     /// ```
     fn index() -> Index {
         let caps = crate::service::scan::ntfs_caps("C:".to_string());
@@ -567,7 +567,7 @@ mod tests {
         });
         assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![(7, 10)]);
 
-        // `*.pdf` parses down to a suffix needle — the suffix highlights.
+        // `*.pdf` parses down to a suffix needle - the suffix highlights.
         let query = parse(q("*.pdf"));
         assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![(6, 10)]);
 
@@ -575,10 +575,10 @@ mod tests {
         let query = parse(q("r?port*"));
         assert_eq!(highlight_ranges("Report.PDF", &fold, false, &query), vec![]);
 
-        // Ranges are UTF-16 units: 'é' is two UTF-8 bytes but one unit, so
-        // "sum" in "résumé.pdf" starts at unit 2, not byte 3.
+        // Ranges are UTF-16 units: e-acute is two UTF-8 bytes but one unit,
+        // so "sum" in "resume.pdf" (accented) starts at unit 2, not byte 3.
         let query = parse(q("sum"));
-        assert_eq!(highlight_ranges("résumé.pdf", &fold, false, &query), vec![(2, 5)]);
+        assert_eq!(highlight_ranges("r\u{e9}sum\u{e9}.pdf", &fold, false, &query), vec![(2, 5)]);
 
         // Overlapping contributions (semicolon multi-pattern) merge.
         let query = parse(q("repo;port"));

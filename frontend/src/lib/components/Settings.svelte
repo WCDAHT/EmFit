@@ -1,5 +1,5 @@
 <!--
-  Settings.svelte — the app settings dialog, opened from the native View
+  Settings.svelte - the app settings dialog, opened from the native View
   menu (no on-screen button). Persists to the global config in appdata
   (core `service::config`, TOML). This is the seed of M6's settings panel.
 
@@ -10,10 +10,10 @@
     3. seed/save its state in the `$effect(open)` / `save()` pair.
   Save applies every tab's state in one config write; Cancel discards all.
 
-  Current pages: General (size units), Treemap (color mode — WizTree parity:
+  Current pages: General (size units), Treemap (color mode - WizTree parity:
   "ranked" auto-assigns the 13-color palette by size rank; "extension" is
   the configurable per-extension mode whose editable list is a FUTURE
-  milestone — plus the free-space toggle).
+  milestone - plus the free-space toggle).
 -->
 <script lang="ts">
   import { getConfig, setConfig } from "../ipc";
@@ -49,7 +49,7 @@
   });
 
   function unitLabel(u: SizeUnit): string {
-    return u === "dynamic" ? "Dynamic (largest unit ≥ 1)" : u;
+    return u === "dynamic" ? "Dynamic (largest unit >= 1)" : u;
   }
 
   async function save() {
@@ -134,7 +134,7 @@
             {:else}
               <p class="hint">
                 Colors by built-in category (executables, archives, images,
-                …). Assigning specific colors to specific extensions will be
+                ...). Assigning specific colors to specific extensions will be
                 configurable here in a later milestone.
               </p>
             {/if}

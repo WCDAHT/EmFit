@@ -1,8 +1,8 @@
 //! Builders for synthetic NTFS structures: records, attributes, whole images.
 //!
 //! Shared by the sweep integration tests and the fixture generator. Everything
-//! here writes the *on-disk* format — real headers, real update-sequence
-//! arrays, real run lists — so the code under test runs its production path,
+//! here writes the *on-disk* format - real headers, real update-sequence
+//! arrays, real run lists - so the code under test runs its production path,
 //! fixups included. A shortcut here (skipping the USA, say) would quietly
 //! exempt the parser from the very repair step the tests exist to prove.
 
@@ -65,7 +65,7 @@ pub fn resident_attr(type_code: u32, value: &[u8]) -> Vec<u8> {
     buf
 }
 
-/// A *named* resident attribute — for `$DATA`, an alternate data stream.
+/// A *named* resident attribute - for `$DATA`, an alternate data stream.
 pub fn named_resident_attr(type_code: u32, name: &str, value: &[u8]) -> Vec<u8> {
     let units: Vec<u16> = name.encode_utf16().collect();
     let name_offset = RESIDENT_HEADER;
@@ -92,7 +92,7 @@ pub fn non_resident_attr(type_code: u32, data_size: u64, allocated: u64, runs: &
     build_non_resident(type_code, None, data_size, allocated, runs)
 }
 
-/// A *named* non-resident attribute — a non-resident alternate data stream.
+/// A *named* non-resident attribute - a non-resident alternate data stream.
 pub fn named_non_resident_attr(
     type_code: u32,
     name: &str,
@@ -206,7 +206,7 @@ pub fn encode_runs(runs: &[(u64, u64)]) -> Vec<u8> {
     out
 }
 
-/// One sparse run (a hole): length only, zero offset bytes — how
+/// One sparse run (a hole): length only, zero offset bytes - how
 /// `$BadClus:$Bad` "spans" the volume while owning no clusters.
 pub fn encode_sparse_run(clusters: u64) -> Vec<u8> {
     let len_len = ((64 - clusters.leading_zeros() as usize).div_ceil(8)).max(1);
@@ -273,7 +273,7 @@ impl RecordSpec {
     }
 
     /// Serialize to on-disk form: header, attributes, end marker, and a
-    /// **valid update sequence array** — the check value is written over the
+    /// **valid update sequence array** - the check value is written over the
     /// last two bytes of every sector and the displaced originals are stashed,
     /// exactly as NTFS does, so `Record::parse` must repair the record to
     /// read it.
@@ -365,7 +365,7 @@ impl ImageSpec {
         let record_size = u64::from(g.bytes_per_record);
         let data_size = self.capacity_records() * record_size;
 
-        // Record 0: $MFT describing itself — its run list *is* the map.
+        // Record 0: $MFT describing itself - its run list *is* the map.
         let mft_runs = encode_runs(&self.fragments);
         let allocated: u64 =
             self.fragments.iter().map(|&(_, c)| c).sum::<u64>() * u64::from(g.bytes_per_cluster);

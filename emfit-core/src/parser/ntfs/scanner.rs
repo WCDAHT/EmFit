@@ -1,7 +1,7 @@
 //! The sweep: read the whole MFT and push what it says at a sink.
 //!
 //! One pass, front to back, in chunks bounded by what the extent map says is
-//! contiguous. Records are parsed **in place** off the read buffer — no
+//! contiguous. Records are parsed **in place** off the read buffer - no
 //! per-record allocation, no copying a kilobyte out only to throw it away.
 //!
 //! Names are the exception, because they arrive as UTF-16 and the index wants
@@ -12,34 +12,34 @@
 //!
 //! A dedicated reader thread issues the next read while the current chunk is
 //! being parsed, cycling two sector-aligned buffers through a pair of
-//! channels. v1 was a strictly serial read→parse→read loop with queue depth 1;
+//! channels. v1 was a strictly serial read->parse->read loop with queue depth 1;
 //! the disk idled during every parse and the CPU idled during every read.
 //!
 //! # Parallel parse
 //!
 //! Each chunk is fanned out across rayon threads, every worker accumulating
 //! into its own scratch ([`WorkerOut`]) so the hot path takes no locks. The
-//! outputs are merged and flushed to the sink on the coordinating thread — the
-//! sink stays single-threaded and dumb, per `architecture.md` §8.
+//! outputs are merged and flushed to the sink on the coordinating thread - the
+//! sink stays single-threaded and dumb, per `architecture.md` sec 8.
 //!
 //! # Extension records
 //!
-//! A file with more attributes than fit in 1024 bytes — many hard links, a
-//! `$DATA` run list fragmented into hundreds of pieces — spills into
+//! A file with more attributes than fit in 1024 bytes - many hard links, a
+//! `$DATA` run list fragmented into hundreds of pieces - spills into
 //! *extension records*. Those appear in the sweep like any other record and
 //! carry a reference to the file they belong to.
 //!
 //! The naive fix is to seek to them on demand, which is what v1 did: two
 //! random 1 KB reads per record, on a volume with tens of thousands of them.
 //! Instead, both halves are collected as the sweep passes over them and joined
-//! at the end — **no seeking at all**, since everything is read exactly once in
+//! at the end - **no seeking at all**, since everything is read exactly once in
 //! sequential order regardless. WizTree does the same, deferring only the
 //! records whose base lies ahead of the read head; collecting both sides makes
 //! the result independent of which came first.
 //!
 //! This matters more than the record count suggests. Attribute lists appear
 //! precisely when a file's `$DATA` is heavily fragmented, which correlates with
-//! it being **large** — so skipping extension records loses a few percent of
+//! it being **large** - so skipping extension records loses a few percent of
 //! the files and a large share of the bytes.
 //!
 //! # Hard links
@@ -57,8 +57,8 @@
 //! # Alternate data streams
 //!
 //! A named `$DATA` attribute is an ADS. Its **allocated** bytes are folded
-//! into the owning file's allocated size — they genuinely occupy disk, and
-//! WizTree accounts them the same way — while the logical size is *not* added
+//! into the owning file's allocated size - they genuinely occupy disk, and
+//! WizTree accounts them the same way - while the logical size is *not* added
 //! to the file's, because streams like `$BadClus:$Bad` report a logical size
 //! equal to the whole volume while occupying nothing. Each stream is also
 //! recorded individually in [`SweepOutcome::ads`], keyed by the owning MFT
@@ -87,7 +87,7 @@ use crate::service::task::{CancellationToken, Progress};
 /// which is exactly the convention the index builder recognizes.
 pub const ROOT_RECORD: u64 = 5;
 
-/// Records 0–15 are the filesystem's own metadata — `$MFT`, `$LogFile`,
+/// Records 0-15 are the filesystem's own metadata - `$MFT`, `$LogFile`,
 /// `$Bitmap` and friends. They are real files occupying real space, so they are
 /// scanned like anything else; this is only where user files begin.
 pub const FIRST_USER_RECORD: u64 = 16;
@@ -123,7 +123,7 @@ impl Default for ScanOptions {
 pub struct AdsStream {
     /// MFT record number of the owning file.
     pub owner: u64,
-    /// The stream's name — the `secret` in `file.txt:secret`.
+    /// The stream's name - the `secret` in `file.txt:secret`.
     pub name: String,
     /// Logical bytes. Can be enormous for sparse system streams
     /// (`$BadClus:$Bad` spans the volume), which is why it is reported here
@@ -139,7 +139,7 @@ pub struct AdsStream {
 pub struct SweepOutcome {
     pub stats: ScanStats,
     /// Every alternate data stream seen, keyed by owning record. A side table
-    /// per `architecture.md` §7 rule 2 — never widens `Node`.
+    /// per `architecture.md` sec 7 rule 2 - never widens `Node`.
     pub ads: Vec<AdsStream>,
 }
 
@@ -155,7 +155,7 @@ pub struct ScanStats {
     pub files: u64,
     pub directories: u64,
 
-    /// Slots whose first four bytes were zero — never written, not corrupt.
+    /// Slots whose first four bytes were zero - never written, not corrupt.
     pub never_used_slots: u64,
     /// Slots with a non-zero, non-`FILE` signature. Genuinely unexpected.
     pub bad_records: u64,
@@ -173,7 +173,7 @@ pub struct ScanStats {
     /// Held-back records that actually gained a name or a size from an
     /// extension. The rest had attribute lists that pointed nowhere useful.
     pub resolved_from_extensions: u64,
-    /// Extension records whose base never appeared — a deleted base, or one
+    /// Extension records whose base never appeared - a deleted base, or one
     /// whose attribute list we could not read. Their attributes are lost.
     pub orphaned_extensions: u64,
 
@@ -266,7 +266,7 @@ pub fn sweep(
     let bytes_per_cluster = layout.boot.bytes_per_cluster;
     let total_records = layout.records_to_scan().min(layout.capacity_records());
 
-    // The bitmap turns "slots ever written" into "files actually here" — a
+    // The bitmap turns "slots ever written" into "files actually here" - a
     // stats cross-check, not the progress denominator. Failing to read it
     // costs nothing but that check.
     if layout.has_bitmap() {
@@ -299,7 +299,7 @@ pub fn sweep(
 
     // Two buffers, two channels: the reader fills one while the parser drains
     // the other. `sync_channel(2)` means a send can never block, so the reader
-    // only ever waits for a free buffer — dropping `free_tx` is what stops it.
+    // only ever waits for a free buffer - dropping `free_tx` is what stops it.
     let (full_tx, full_rx) = mpsc::sync_channel::<Result<Chunk>>(2);
     let (free_tx, free_rx) = mpsc::channel::<AlignedBuf>();
     for _ in 0..2 {
@@ -330,7 +330,7 @@ pub fn sweep(
                     .min(records_per_chunk)
                     .min(total_records - record);
                 if to_read == 0 {
-                    // The record straddles a fragment boundary — only possible
+                    // The record straddles a fragment boundary - only possible
                     // when records are larger than clusters. Skip rather than
                     // stall.
                     record += 1;
@@ -464,8 +464,8 @@ pub fn sweep(
 /// Fan one chunk's records out across rayon workers.
 ///
 /// Every worker folds into its own [`WorkerOut`], so the parse takes no locks;
-/// `collect` preserves split order, which keeps the emission order — and
-/// therefore the whole scan — deterministic.
+/// `collect` preserves split order, which keeps the emission order - and
+/// therefore the whole scan - deterministic.
 fn parse_chunk(
     chunk: &mut [u8],
     first_record: u64,
@@ -585,7 +585,7 @@ struct WorkerOut {
 ///
 /// The index builder keys entries by their filesystem id, so several names for
 /// one file need distinct ids or they displace each other. Record numbers use
-/// the low 48 bits, leaving the top free for a counter — and the builder masks
+/// the low 48 bits, leaving the top free for a counter - and the builder masks
 /// those bits off again when recording the native id, so every link still
 /// reports the one record it describes.
 fn alias_id(record: u64, index: usize) -> u64 {
@@ -661,7 +661,7 @@ struct HeldExtension {
 /// Both halves of every split file, collected as the sweep passes them.
 ///
 /// Keyed by base record number, so it does not matter whether a base or its
-/// extensions are read first — which is what makes this work in one sequential
+/// extensions are read first - which is what makes this work in one sequential
 /// pass with no seeking.
 #[derive(Default)]
 struct Held {
@@ -685,7 +685,7 @@ fn resolve_held(
         if let Some(extensions) = held.extensions.remove(&fs_id) {
             for extension in extensions {
                 // Names in extension records are additional links, not
-                // replacements — a file whose attributes overflowed is exactly
+                // replacements - a file whose attributes overflowed is exactly
                 // the kind that has many of them.
                 if !extension.names.is_empty() {
                     base.names.extend(extension.names);
@@ -767,8 +767,8 @@ fn resolve_held(
 ///
 /// Compressed streams carry the true figure in their header. For everything
 /// else the run list is checked for holes: a holed stream reports the full
-/// *reserved* span as its allocated size, and `$BadClus:$Bad` — the whole
-/// volume as one hole — does so **without** setting the sparse flag, so the
+/// *reserved* span as its allocated size, and `$BadClus:$Bad` - the whole
+/// volume as one hole - does so **without** setting the sparse flag, so the
 /// flag cannot be trusted. When the runs show no holes the header's figure
 /// is used, because a multi-fragment stream's VCN-0 header covers the whole
 /// stream while its runs cover only this fragment.
@@ -878,7 +878,7 @@ fn parse_one(
                 }
 
                 fname.decode_name_into(&mut batch.scratch);
-                // The root names itself "." — NTFS-internal spelling, not a
+                // The root names itself "." - NTFS-internal spelling, not a
                 // display name. It becomes the empty name the sink contract
                 // reserves for the root.
                 let is_root_self_name = fname.parent_record() == number && batch.scratch == ".";
@@ -909,7 +909,7 @@ fn parse_one(
                         // later fragments repeat stale values.
                         if nr.starting_vcn() == 0 {
                             fields.size = nr.data_size();
-                            // What it costs, not the virtual range it spans —
+                            // What it costs, not the virtual range it spans -
                             // those differ for every compressed and sparse
                             // file.
                             fields.allocated = stream_physical(&nr, bytes_per_cluster);
@@ -1049,7 +1049,7 @@ fn parse_one(
 ///
 /// The best namespace wins, first-seen breaking ties, so the choice is
 /// deterministic and the owner is the name a user is most likely to recognize.
-/// Any single consistent choice would do — what matters is that there is
+/// Any single consistent choice would do - what matters is that there is
 /// exactly one.
 fn owning_slot(slots: &[NameSlot]) -> usize {
     let mut best = 0;
@@ -1075,8 +1075,8 @@ fn owning_name(names: &[NameCandidate]) -> usize {
 /// Whether an `$ATTRIBUTE_LIST` sends a name or the file's data to another
 /// record.
 ///
-/// An attribute list can be entirely self-referential — listing attributes that
-/// never actually moved — in which case the record is complete as read and
+/// An attribute list can be entirely self-referential - listing attributes that
+/// never actually moved - in which case the record is complete as read and
 /// holding it back would be waste.
 fn references_elsewhere(value: &[u8], own_record: u64) -> bool {
     attr::parse_attribute_list(value)
@@ -1264,7 +1264,7 @@ mod tests {
     #[test]
     fn alias_ids_do_not_collide_across_records() {
         // Two different files, each with extra names, must not land on the
-        // same key — that would reattach one file's children to the other.
+        // same key - that would reattach one file's children to the other.
         assert_ne!(alias_id(100, 1), alias_id(101, 1));
         assert_ne!(alias_id(100, 1), alias_id(100, 2));
         assert_ne!(alias_id(100, 1), 101);

@@ -3,9 +3,9 @@
 //! Opening `\\.\C:` or `\\.\PhysicalDrive0` requires Administrator. Without
 //! it, the scan fails with a bare access-denied that tells the user nothing.
 //! Checking up front means the app can offer a one-click relaunch instead
-//! (`features.md` §1.1).
+//! (`features.md` sec 1.1).
 //!
-//! Note that *discovery* needs no elevation — `service::volume` opens volumes
+//! Note that *discovery* needs no elevation - `service::volume` opens volumes
 //! with zero desired access, so the drive list, sizes, and partition offsets
 //! are all available before the user decides. Only reading bytes needs rights.
 
@@ -14,7 +14,7 @@ use crate::error::Result;
 /// Whether this process can open raw devices.
 ///
 /// Windows: whether the process token is elevated. Elsewhere: `false`, since
-/// no raw scanner exists on those platforms — the directory walker is the only
+/// no raw scanner exists on those platforms - the directory walker is the only
 /// path and it needs no special rights.
 pub fn is_elevated() -> bool {
     #[cfg(windows)]

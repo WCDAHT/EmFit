@@ -1,23 +1,23 @@
-//! Application configuration (STANDARDS Â§4.4).
+//! Application configuration (STANDARDS sec 4.4).
 //!
 //! A single TOML file under the OS config directory holds the user's settings
 //! and any state the app wants to remember between runs (the current theme,
-//! window geometry, recent files, â€¦). It is loaded once at startup and
+//! window geometry, recent files, ...). It is loaded once at startup and
 //! rewritten whenever a setting changes.
 //!
-//! Design notes (this module is copied verbatim into new apps â€” keep it
+//! Design notes (this module is copied verbatim into new apps - keep it
 //! project-agnostic):
 //! - **Identity comes from [`crate::app`].** The company/product constants
 //!   there resolve the on-disk path; nothing here is app-specific.
 //! - **Typed, not stringly.** [`Config`] is a plain serde struct. To add a
-//!   setting, add a field with a sensible default â€” that's the only change
+//!   setting, add a field with a sensible default - that's the only change
 //!   needed (load/save are generic). `theme` is the worked example.
 //! - **Schema-versioned.** Every config carries [`SCHEMA_VERSION`] so a future
 //!   format change can migrate instead of guessing.
 //! - **First-run defaults.** A missing file is not an error: [`Config::load`]
 //!   returns defaults. The app never asks the user to create the file.
 //! - **Corruption is recoverable.** A malformed file logs a warning and falls
-//!   back to defaults (STANDARDS Â§4.5: a bad config can be regenerated). The
+//!   back to defaults (STANDARDS sec 4.5: a bad config can be regenerated). The
 //!   next save overwrites it.
 //!
 //! ```ignore
@@ -39,7 +39,7 @@ use crate::app;
 use crate::error::{Error, Result};
 
 /// Bump when a breaking change to [`Config`]'s shape lands, and add migration
-/// handling keyed off the loaded value (STANDARDS Â§4.4).
+/// handling keyed off the loaded value (STANDARDS sec 4.4).
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// File name within the config directory.
@@ -50,7 +50,7 @@ const FILE_NAME: &str = "config.toml";
 /// `#[serde(default)]` makes every field optional on read: an older file
 /// missing a newly-added field loads cleanly (the field takes its default),
 /// which keeps forward/backward compatibility cheap. Add new settings as
-/// fields below â€” no other code changes are required to persist them.
+/// fields below - no other code changes are required to persist them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -59,11 +59,11 @@ pub struct Config {
     pub schema_version: u32,
 
     /// Selected UI theme: `"dark"`, `"light"`, or `None` to follow the OS.
-    /// The worked example of a persisted setting â€” replace/extend per app.
+    /// The worked example of a persisted setting - replace/extend per app.
     pub theme: Option<String>,
 
     /// How byte counts render everywhere in the UI: `"dynamic"` (largest
-    /// unit whose value is ≥ 1) or one fixed unit — `"B"`, `"KB"`, `"MB"`,
+    /// unit whose value is >= 1) or one fixed unit - `"B"`, `"KB"`, `"MB"`,
     /// `"GB"`, `"TB"`, `"bit"`, `"Kbit"`, `"Mbit"`, `"Gbit"`, `"Tbit"`.
     /// The single formatter honoring it lives in the frontend
     /// (`lib/format.ts`).
@@ -71,7 +71,7 @@ pub struct Config {
 
     /// Treemap coloring, edited from the settings dialog.
     pub treemap: TreemapConfig,
-    // --- add further settings here (window geometry, recent files, â€¦) ---
+    // --- add further settings here (window geometry, recent files, ...) ---
 }
 
 impl Default for Config {
@@ -88,12 +88,12 @@ impl Default for Config {
 /// How the treemap colors its rectangles.
 ///
 /// Two modes (UI direction of 2026-07-29):
-/// - `"ranked"` — WizTree's scheme: extensions are ranked by total
+/// - `"ranked"` - WizTree's scheme: extensions are ranked by total
 ///   allocated bytes and assigned the 13-color WizTree palette in rank
 ///   order; any extension past the list takes the last (gray) color. The
 ///   palette currently lives in the frontend (`Treemap.svelte`).
-/// - `"extension"` — colors by extension with a configurable
-///   extension→color list. **Not in the current milestone:** today it falls
+/// - `"extension"` - colors by extension with a configurable
+///   extension->color list. **Not in the current milestone:** today it falls
 ///   back to the built-in category palette (`--category-N`); the editable
 ///   per-extension list (and the ranked palette itself) should eventually
 ///   persist here.

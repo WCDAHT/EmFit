@@ -1,11 +1,11 @@
 //! The native Windows shell context menu (roadmap M4, rescoped 2026-07-30).
 //!
-//! Right-click hands the node's path to the real `IContextMenu` — the same
-//! menu Explorer shows, extensions and all — exactly as WizTree does. EmFit
+//! Right-click hands the node's path to the real `IContextMenu` - the same
+//! menu Explorer shows, extensions and all - exactly as WizTree does. EmFit
 //! appends two items of its own, **Copy path** and (for folders) **Zoom
 //! in**, and ships no mutating entries; delete/rename/move are the shell's
 //! verbs and the shell's business. EmFit actions that touch app state are
-//! returned as a [`MenuAction`] for the caller to apply — this module knows
+//! returned as a [`MenuAction`] for the caller to apply - this module knows
 //! paths and menus, not nodes and views.
 //!
 //! # Threading & ownership
@@ -16,19 +16,19 @@
 //! dismisses with `WM_CANCELMODE` the moment its owning thread loses
 //! activation, `SetForegroundWindow` from a background thread is subject to
 //! the foreground-lock rules (so it silently failed at times), and WebView2
-//! — a separate *process* — re-asserts activation right after the click.
+//! (a separate *process*) re-asserts activation right after the click.
 //! Owning the menu on the window the user just clicked sidesteps all three:
 //! it already IS the foreground window.
 //!
 //! `TrackPopupMenuEx` runs its own modal message loop, so the app stays
-//! responsive while the menu is up — this is how every native app shows
+//! responsive while the menu is up - this is how every native app shows
 //! menus. Shell extensions with dynamic submenus ("Open with", "Send to")
 //! populate only if `WM_INITMENUPOPUP` / `WM_DRAWITEM` / `WM_MEASUREITEM`
 //! reach `IContextMenu2/3`; since the owner's window procedure belongs to
 //! tao, the window is subclassed (`SetWindowSubclass`) for exactly the
 //! lifetime of the menu to forward them.
 
-/// What the user picked from EmFit's own menu items — shell verbs and Copy
+/// What the user picked from EmFit's own menu items - shell verbs and Copy
 /// path are handled internally and report [`MenuAction::None`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
@@ -40,7 +40,7 @@ pub enum MenuAction {
 /// Show the shell context menu for an absolute path at the cursor, owned by
 /// `hwnd` (the app window, as a raw handle so tauri's and our `windows`
 /// crate versions never need to agree on a type). The zoom item reads
-/// "Zoom in" for a folder (`is_dir`) and "Zoom in to parent" for a file —
+/// "Zoom in" for a folder (`is_dir`) and "Zoom in to parent" for a file -
 /// the caller resolves which node actually gets drilled. Must be called on
 /// the main thread; blocks it modally while the menu is open, invokes
 /// whatever shell verb was chosen, and returns the EmFit action for the
@@ -163,7 +163,7 @@ mod windows_impl {
         // The main thread is already an STA (WebView2 requires it); this is
         // a no-op returning S_FALSE there, and makes the module safe to call
         // early. RPC_E_CHANGED_MODE would mean an MTA main thread, which
-        // tao/WebView2 never set up — log and bail rather than crash.
+        // tao/WebView2 never set up - log and bail rather than crash.
         // SAFETY: thread-local COM init with no teardown obligations at this
         // call depth (the matching uninit belongs to whoever made the STA).
         let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
@@ -173,7 +173,7 @@ mod windows_impl {
 
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
-        // Path → absolute PIDL → parent IShellFolder + child PIDL.
+        // Path -> absolute PIDL -> parent IShellFolder + child PIDL.
         let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
         // SAFETY: valid NUL-terminated wide string; on success `pidl` is a
         // CoTaskMem allocation freed by the guard below.
@@ -234,7 +234,7 @@ mod windows_impl {
             let mut pt = POINT::default();
             // SAFETY: out-param write.
             unsafe { GetCursorPos(&mut pt) }?;
-            // SAFETY: modal tracking on the owner's own thread — the window
+            // SAFETY: modal tracking on the owner's own thread - the window
             // is foreground from the very click that got us here, which is
             // what keeps the menu from being cancelled instantly.
             // TPM_RETURNCMD makes the return value the chosen id (0 =
@@ -253,7 +253,7 @@ mod windows_impl {
             match chosen.0 as u32 {
                 0 => {} // dismissed
                 ID_COPY_PATH => copy_to_clipboard(hwnd, &wide)?,
-                // App-state actions are the caller's to apply — this module
+                // App-state actions are the caller's to apply - this module
                 // knows menus, not views.
                 ID_ZOOM_IN => return Ok(super::MenuAction::ZoomIn),
                 id @ ID_SHELL_FIRST..=ID_SHELL_LAST => {

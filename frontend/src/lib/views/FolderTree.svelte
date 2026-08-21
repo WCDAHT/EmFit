@@ -1,15 +1,15 @@
 <!--
-  FolderTree.svelte — the WizTree-style hierarchical pane (features.md §4.1),
+  FolderTree.svelte - the WizTree-style hierarchical pane (features.md sec 4.1),
   rendered as a full tree TABLE: Name, Allocated, Size, % of Parent (bar),
   Items, Files, Folders, Modified, Attributes. Every column sorts (click the
   header) and resizes (drag the header edge). Both size columns are always
-  visible — there is no allocated/logical toggle.
+  visible - there is no allocated/logical toggle.
 
   Hand-rolled on purpose: as of 2026-07 no widely-known tree-table library
   is production-ready on Svelte 5 (AG Grid tree data is Enterprise-only;
   TanStack Table's Svelte adapter is Svelte-4-era, its v9 an alpha), and the
-  hard parts — row virtualization and lazy child materialization from CSR
-  ranges — were already built here. Rows come from Rust one directory at a
+  hard parts - row virtualization and lazy child materialization from CSR
+  ranges - were already built here. Rows come from Rust one directory at a
   time and are flattened into one array; the visible slice is windowed, so a
   directory with 100k children expands without stalling. Sorting reorders
   each sibling group client-side (the data is already resident per level).
@@ -177,7 +177,7 @@
     expanded.clear();
     open = new Set();
     const roots = await treeRoots();
-    // A single volume starts opened one level — the useful state.
+    // A single volume starts opened one level - the useful state.
     if (roots.length === 1 && roots[0].has_children) {
       await toggleLoad(roots[0]);
       open.add(keyOf(roots[0]));

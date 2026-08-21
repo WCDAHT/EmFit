@@ -1,8 +1,8 @@
 //! The full sweep pipeline against synthetic NTFS images.
 //!
-//! Every test here builds a real volume image — boot sector, fragmented MFT,
-//! records with valid update-sequence arrays — writes it to disk, and runs the
-//! production path over it: `FileBlockSource` → `bootstrap::probe` →
+//! Every test here builds a real volume image - boot sector, fragmented MFT,
+//! records with valid update-sequence arrays - writes it to disk, and runs the
+//! production path over it: `FileBlockSource` -> `bootstrap::probe` ->
 //! `scanner::sweep`. Nothing is mocked below the filesystem, so the offset
 //! arithmetic, fixup repair, deferral, and hard-link accounting are all
 //! exercised together, on any platform CI runs.
@@ -40,7 +40,7 @@ fn sweep_into(spec: &ImageSpec, tag: &str, sink: &mut dyn EntrySink) -> SweepOut
 /// The standard fixture: a three-fragment MFT with a small tree.
 ///
 /// Fragment 1 (LCN 4, 2 clusters) holds records 0..8, fragment 2 (LCN 20,
-/// 3 clusters) records 8..20, fragment 3 (LCN 40, 1 cluster) records 20..24 —
+/// 3 clusters) records 8..20, fragment 3 (LCN 40, 1 cluster) records 20..24 -
 /// so the tree spans every fragment and a batch that ignored the boundaries
 /// would read garbage.
 fn standard_image() -> ImageSpec {
@@ -248,7 +248,7 @@ fn a_sparse_system_stream_does_not_count_the_volume_twice() {
 
     let spec = ImageSpec {
         geometry: GEOMETRY_512N,
-        // 6 clusters × 4 records each: room for records 20 and 21 below.
+        // 6 clusters x 4 records each: room for records 20 and 21 below.
         fragments: vec![(4, 6)],
         records: vec![
             RecordSpec::new(5)
@@ -313,11 +313,11 @@ fn extension_records_are_joined_without_seeking() {
                     (0x30, 0, 22),
                     (0x80, 0, 23),
                 ])),
-            // Extension holding the name…
+            // Extension holding the name...
             RecordSpec::new(22)
                 .extension_of(21)
                 .attr(file_name_attr(5, 1, "big.bin")),
-            // …and the one holding the data.
+            // ...and the one holding the data.
             RecordSpec::new(23).extension_of(21).attr(non_resident_attr(
                 0x80,
                 1_000_000,
@@ -450,7 +450,7 @@ fn tiny_chunks_still_respect_fragment_boundaries() {
 
 #[test]
 fn scan_image_builds_a_rolled_up_index() {
-    // The service end to end: image → sweep → builder → finished index.
+    // The service end to end: image -> sweep -> builder -> finished index.
     let path = standard_image().write("service");
     let cancel = CancellationToken::new();
     let outcome = scan::scan_image(
@@ -494,7 +494,7 @@ fn scan_image_builds_a_rolled_up_index() {
 #[test]
 fn a_recorded_sweep_replays_into_the_same_entries() {
     // RecordingSink round-trip: what the scanner pushed can be replayed into
-    // any other sink — the mechanism for turning a field bug into a fixture.
+    // any other sink - the mechanism for turning a field bug into a fixture.
     let mut sink = RecordingSink::new();
     sweep_into(&standard_image(), "replay", &mut sink);
 

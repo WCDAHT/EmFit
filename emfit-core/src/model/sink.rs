@@ -1,7 +1,7 @@
 //! The seam itself: where scanners hand their findings over.
 //!
 //! [`EntrySink`] is the entire contract between "read a filesystem" and "the
-//! rest of EmFit" (`architecture.md` §5). [`IndexBuilder`] is the one
+//! rest of EmFit" (`architecture.md` sec 5). [`IndexBuilder`] is the one
 //! implementation that matters; the rest of this module is the tooling that
 //! makes a push-based seam workable.
 //!
@@ -9,7 +9,7 @@
 //!
 //! Push-based control flow inverts the stack: the scanner drives the loop and
 //! calls into us, so there is no obvious place to stand and inspect "the
-//! three-millionth entry" (`architecture.md` §9). The sink *is* that place.
+//! three-millionth entry" (`architecture.md` sec 9). The sink *is* that place.
 //! [`ValidatingSink`] wraps any other sink and checks every entry on its way
 //! past; [`RecordingSink`] captures a scan so a test can assert on what a
 //! scanner produced without building an index at all; [`TeeSink`] does both at
@@ -43,8 +43,8 @@ pub enum ScanWarning {
     NameNotUtf8 { fs_id: u64 },
     /// The scan produced no root, so one was invented.
     SynthesizedRoot,
-    /// Entries that could not be reached from the root — unresolved parents or
-    /// parent cycles — were gathered into a synthetic folder.
+    /// Entries that could not be reached from the root - unresolved parents or
+    /// parent cycles - were gathered into a synthetic folder.
     OrphansCollected { count: u64 },
     /// Nodes remained unreachable after orphan collection. Indicates a bug in
     /// the builder rather than bad input; should never fire.
@@ -90,7 +90,7 @@ impl WarningLog {
     }
 
     /// Consume the log, appending a [`ScanWarning::WarningsDropped`] tally if
-    /// anything was discarded — so a truncated list never passes for a
+    /// anything was discarded - so a truncated list never passes for a
     /// complete one.
     pub fn into_vec(mut self) -> Vec<ScanWarning> {
         if self.dropped > 0 {
@@ -104,16 +104,16 @@ impl WarningLog {
 
 /// Where entries land.
 ///
-/// The contract, in four rules (`architecture.md` §5):
+/// The contract, in four rules (`architecture.md` sec 5):
 ///
 /// 1. Entries arrive in **batches**, never one at a time.
-/// 2. In **no guaranteed order** — a parent may arrive after its children.
+/// 2. In **no guaranteed order** - a parent may arrive after its children.
 /// 3. **Borrowed, not owned**: `name` points into the scanner's read buffer,
 ///    so copy what you need before returning.
-/// 4. Returning `Break` **stops the scan** — cancellation and early-exit
+/// 4. Returning `Break` **stops the scan** - cancellation and early-exit
 ///    limits are the same mechanism.
 pub trait EntrySink {
-    /// Copy what you need before returning — entries borrow the scanner's buffer.
+    /// Copy what you need before returning - entries borrow the scanner's buffer.
     /// Returns `Break` to stop the scan (cancel, or an early-exit limit).
     fn push_batch(&mut self, entries: &[RawEntry<'_>]) -> ControlFlow<()>;
 
@@ -182,7 +182,7 @@ impl RecordedEntry {
 /// Keeps everything pushed to it, and builds nothing.
 ///
 /// The way to test a scanner: run it against a fixture image, then assert on
-/// exactly what it produced — no index, no rollup, no interpretation in
+/// exactly what it produced - no index, no rollup, no interpretation in
 /// between. Also records batch boundaries, so a test can check that a scanner
 /// batches at all rather than pushing one entry at a time.
 #[derive(Debug, Default)]
@@ -201,7 +201,7 @@ impl RecordingSink {
     /// Return `Break` once `n` entries have been recorded.
     ///
     /// Tests that a scanner actually honours the stop signal instead of
-    /// running to completion — the failure mode that would make Cancel look
+    /// running to completion - the failure mode that would make Cancel look
     /// broken to a user.
     #[must_use]
     pub fn stop_after(mut self, n: usize) -> Self {
@@ -305,7 +305,7 @@ pub enum SinkViolation {
 ///
 /// # Cost
 ///
-/// Duplicate detection keeps a [`HashSet`] of every id seen — tens of
+/// Duplicate detection keeps a [`HashSet`] of every id seen - tens of
 /// megabytes on a volume with millions of files. Intended for tests, fixtures,
 /// and diagnostics, not for wrapping every production scan.
 #[derive(Debug)]
@@ -425,7 +425,7 @@ impl<S: EntrySink> EntrySink for ValidatingSink<S> {
 
 /// Forwards everything to two sinks.
 ///
-/// Lets a live scan build its index *and* be recorded at the same time —
+/// Lets a live scan build its index *and* be recorded at the same time -
 /// `TeeSink::new(IndexBuilder::new(..), RecordingSink::new())` turns a
 /// reproducible fixture out of a real volume, which is how a bug found on
 /// someone's disk becomes a test that runs anywhere.

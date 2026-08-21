@@ -29,12 +29,12 @@
 //!
 //! From the shell side, wire the `on_progress` closure to a
 //! `tauri::ipc::Channel<Progress>` so the webview receives typed progress
-//! events without polling. See STANDARDS §3.5.
+//! events without polling. See STANDARDS sec 3.5.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// A typed progress event. STANDARDS §3.5: avoid stringly-typed status.
+/// A typed progress event. STANDARDS sec 3.5: avoid stringly-typed status.
 ///
 /// Each `Started` opens a *phase* and carries a human-readable `message`
 /// describing what is happening right now ("Reading log", "Parsing records",
@@ -74,7 +74,7 @@ impl Progress {
 }
 
 /// A cancellation signal that can be cloned and checked across threads.
-/// Wire to a Cancel button per STANDARDS §3.5.
+/// Wire to a Cancel button per STANDARDS sec 3.5.
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,

@@ -1,8 +1,8 @@
-//! File-type classification: extension → category, for coloring and the
-//! Type column (features.md §3).
+//! File-type classification: extension -> category, for coloring and the
+//! Type column (features.md sec 3).
 //!
-//! The category list is deliberately small — it feeds the eight-slot
-//! `--category-N` palette (STANDARDS §2.3). The mapping lives here in Rust
+//! The category list is deliberately small - it feeds the eight-slot
+//! `--category-N` palette (STANDARDS sec 2.3). The mapping lives here in Rust
 //! and rides to the webview inside each row, so the frontend never grows its
 //! own forked copy of this table.
 
@@ -40,7 +40,7 @@ impl FileKind {
             }
             "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "ods" | "rtf"
             | "txt" | "md" | "csv" | "log" | "eml" | "msg" => Self::Document,
-            // `.ts` is claimed by Video above (MPEG transport stream) — on a
+            // `.ts` is claimed by Video above (MPEG transport stream) - on a
             // disk analyzer the multi-gigabyte reading wins over TypeScript.
             "rs" | "c" | "cpp" | "h" | "hpp" | "cs" | "java" | "py" | "js" | "tsx" | "svelte"
             | "go" | "rb" | "php" | "sh" | "sql" | "json" | "xml" | "yml" | "yaml" | "toml"
@@ -64,7 +64,7 @@ impl FileKind {
         }
     }
 
-    /// Which `--category-N` token colors this kind (1–8; STANDARDS §2.3).
+    /// Which `--category-N` token colors this kind (1-8; STANDARDS sec 2.3).
     /// `Other` gets 0: neutral, no category color.
     pub fn category_slot(&self) -> u8 {
         match self {
@@ -82,7 +82,7 @@ impl FileKind {
 }
 
 /// The extension without its dot, or `""`. Dotfiles (`.gitignore`) have no
-/// extension — the leading dot is a name, not a separator.
+/// extension - the leading dot is a name, not a separator.
 pub fn extension_of(name: &str) -> &str {
     match name.rfind('.') {
         Some(0) | None => "",

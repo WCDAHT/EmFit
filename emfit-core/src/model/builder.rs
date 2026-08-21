@@ -3,15 +3,15 @@
 //! Scanners push batches; this accumulates them and, once the scan ends, runs
 //! four linear passes to produce the finished index:
 //!
-//! 1. **resolve** — filesystem parent ids become [`NodeId`]s
-//! 2. **collect** — anything not reaching the root goes to a synthetic folder
-//! 3. **link** — parent→child edges into CSR form
-//! 4. **rollup** — subtree sizes and counts, children before parents
+//! 1. **resolve** - filesystem parent ids become [`NodeId`]s
+//! 2. **collect** - anything not reaching the root goes to a synthetic folder
+//! 3. **link** - parent->child edges into CSR form
+//! 4. **rollup** - subtree sizes and counts, children before parents
 //!
 //! Entries may arrive in any order and a parent may arrive after its children,
 //! which is why parent ids are parked raw and resolved in one pass at the end.
 //! NTFS pushes in MFT order (effectively random); directory walkers push
-//! parents first. Neither is privileged. See `architecture.md` §5, §8.
+//! parents first. Neither is privileged. See `architecture.md` sec 5, sec 8.
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
@@ -29,7 +29,7 @@ pub const ORPHAN_FOLDER_NAME: &str = "[Unreachable]";
 
 /// Maps a filesystem's own ids onto [`NodeId`]s during the build.
 ///
-/// Dense when ids are small and contiguous — NTFS record numbers and ext4
+/// Dense when ids are small and contiguous - NTFS record numbers and ext4
 /// inodes are, so a `Vec` makes every lookup an array index. Sparse otherwise,
 /// because a `Vec` indexed by ZFS object ids would be mostly holes.
 ///
@@ -130,8 +130,8 @@ impl IndexBuilder {
         }
     }
 
-    /// Pre-allocate for a known entry count. Scanners that can estimate — NTFS
-    /// knows its MFT record count before reading — should, to avoid regrowing
+    /// Pre-allocate for a known entry count. Scanners that can estimate - NTFS
+    /// knows its MFT record count before reading - should, to avoid regrowing
     /// several hundred megabytes mid-scan.
     pub fn reserve(&mut self, entries: usize) {
         self.nodes.reserve(entries);
@@ -173,7 +173,7 @@ impl IndexBuilder {
 
         let has_ids = caps.has_stable_ids;
 
-        // Pass 0 — make sure there is a root to hang everything from.
+        // Pass 0 - make sure there is a root to hang everything from.
         let root = match root_fs.and_then(|fs| fs_to_node.get(fs)) {
             Some(id) => id,
             None => {
@@ -189,7 +189,7 @@ impl IndexBuilder {
             }
         };
 
-        // Pass 1 — filesystem parent ids become NodeIds. Anything unresolvable
+        // Pass 1 - filesystem parent ids become NodeIds. Anything unresolvable
         // is left pointing at itself and picked up by pass 2.
         for (i, node) in nodes.iter_mut().enumerate() {
             let id = NodeId::new(i as u32);
@@ -214,10 +214,10 @@ impl IndexBuilder {
             }
         }
 
-        // Pass 2 — gather everything that cannot reach the root into one
+        // Pass 2 - gather everything that cannot reach the root into one
         // synthetic folder. Two causes, one condition: a parent that never
         // arrived, or a parent cycle. Attaching them to the root instead would
-        // assert they live at the top of the volume — a claim the scan never
+        // assert they live at the top of the volume - a claim the scan never
         // made.
         let unrooted = find_unrooted(&nodes, root);
         if !unrooted.is_empty() {
@@ -237,10 +237,10 @@ impl IndexBuilder {
             }
         }
 
-        // Pass 3 — CSR child lists.
+        // Pass 3 - CSR child lists.
         let children = link_children(&mut nodes);
 
-        // Pass 4 — subtree totals, children before parents.
+        // Pass 4 - subtree totals, children before parents.
         let visited = rollup(&mut nodes, &children, root);
         if visited != nodes.len() {
             warnings.push(ScanWarning::UnreachableNodes {
@@ -307,15 +307,15 @@ impl EntrySink for IndexBuilder {
             self.parent_fs.push(entry.parent_id);
             if self.caps.has_stable_ids {
                 // The low 48 bits are the filesystem's own number. A scanner
-                // that emits several entries for one file — the names of a
-                // hard-linked file — distinguishes them in the high bits so
+                // that emits several entries for one file - the names of a
+                // hard-linked file - distinguishes them in the high bits so
                 // each gets its own map slot, while every one of them still
                 // reports the single record they all describe.
                 self.native_ids.push(entry.fs_id & 0x0000_FFFF_FFFF_FFFF);
             }
             self.fs_to_node.insert(entry.fs_id, id);
 
-            // The root is the entry that is its own parent — NTFS record 5,
+            // The root is the entry that is its own parent - NTFS record 5,
             // ext4 inode 2. A well-formed scan pushes exactly one.
             if entry.parent_id == entry.fs_id {
                 self.root_fs = Some(entry.fs_id);
@@ -376,11 +376,11 @@ fn synthesize_node(
 
 /// Every node that cannot reach the root by following parent pointers.
 ///
-/// The parent graph is functional — each node has exactly one parent — so a
+/// The parent graph is functional - each node has exactly one parent - so a
 /// single marking walk settles every node in O(n) total. Three live states:
 /// unknown, in-progress, settled. Walking up from any node either reaches a
 /// node already known to be rooted (the whole path is rooted) or re-enters the
-/// in-progress path (a cycle, so the whole path is unrooted — including the
+/// in-progress path (a cycle, so the whole path is unrooted - including the
 /// tail that merely leads into it, which cannot reach the root either).
 fn find_unrooted(nodes: &[Node], root: NodeId) -> Vec<NodeId> {
     const UNKNOWN: u8 = 0;
@@ -470,7 +470,7 @@ fn link_children(nodes: &mut [Node]) -> Vec<NodeId> {
 /// of nodes reached, which should equal `nodes.len()`.
 ///
 /// Preorder places a parent before all its descendants, so walking the preorder
-/// **backwards** guarantees every child is final before its parent is read —
+/// **backwards** guarantees every child is final before its parent is read -
 /// one pass, no recursion, no per-node bookkeeping.
 ///
 /// Additions saturate: a corrupt volume can report sizes that overflow when
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn clamp_name_truncates_on_a_char_boundary() {
-        let long = "é".repeat(u16::MAX as usize); // two bytes each
+        let long = "\u{e9}".repeat(u16::MAX as usize); // two bytes each
         let clamped = clamp_name(&long);
         assert!(clamped.len() <= u16::MAX as usize);
         assert!(long.starts_with(clamped));

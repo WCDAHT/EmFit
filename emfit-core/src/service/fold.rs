@@ -1,15 +1,15 @@
 //! Case folding, per volume rather than per program.
 //!
 //! Search must compare names the way the *filesystem* does, not the way Rust's
-//! `to_lowercase` does. On NTFS the authority is `$UpCase` — a 128 KiB table
-//! in MFT record 10 mapping every UTF-16 code unit to its uppercase form —
+//! `to_lowercase` does. On NTFS the authority is `$UpCase` - a 128 KiB table
+//! in MFT record 10 mapping every UTF-16 code unit to its uppercase form -
 //! which is what the filesystem itself consults for name comparisons. Other
 //! filesystems supply their own rule or none, so folding is a value handed
-//! over by the scan, not a hardcoded function (features.md §2).
+//! over by the scan, not a hardcoded function (features.md sec 2).
 //!
 //! Everything here is **allocation-free per comparison**: the matcher walks
 //! arena slices and folds characters on the fly. v1 called `to_lowercase()`
-//! on every name for every keystroke — millions of `String`s per query.
+//! on every name for every keystroke - millions of `String`s per query.
 
 /// A volume's case-folding rule.
 #[derive(Debug, Clone, Default)]
@@ -20,7 +20,7 @@ pub enum CaseFold {
     Simple,
     /// Fold via the volume's own `$UpCase` table (one `u16` per BMP code
     /// unit). Supplementary-plane characters are compared as-is, exactly as
-    /// NTFS does — it compares UTF-16 units and the table only covers the BMP.
+    /// NTFS does - it compares UTF-16 units and the table only covers the BMP.
     Table(std::sync::Arc<[u16]>),
 }
 
@@ -59,7 +59,7 @@ impl CaseFold {
             }
             Self::Simple => {
                 // Simple (1:1) uppercase. Full case folding can expand one
-                // char to several (ß → SS), which filesystems don't do.
+                // char to several (sharp s -> SS), which filesystems don't do.
                 let mut up = c.to_uppercase();
                 match (up.next(), up.next()) {
                     (Some(single), None) => single,
@@ -88,7 +88,7 @@ impl CaseFold {
 
     /// Whether `haystack` contains `needle` under this folding, no allocation.
     ///
-    /// `needle` should already be folded (via [`CaseFold::fold_str`]) — the
+    /// `needle` should already be folded (via [`CaseFold::fold_str`]) - the
     /// query does that once; the haystack is folded on the fly per character.
     pub fn contains_prefolded(&self, haystack: &str, needle: &str) -> bool {
         if needle.is_empty() {
@@ -163,15 +163,15 @@ impl CaseFold {
 mod tests {
     use super::*;
 
-    /// A `$UpCase`-shaped table: identity except a→A style ASCII folding,
+    /// A `$UpCase`-shaped table: identity except a->A style ASCII folding,
     /// plus one deliberate quirk so tests can tell it apart from Simple.
     fn quirky_table() -> Vec<u16> {
         let mut table: Vec<u16> = (0..UPCASE_LEN as u32).map(|c| c as u16).collect();
         for c in b'a'..=b'z' {
             table[c as usize] = u16::from(c - 32);
         }
-        // The quirk: this volume says 'µ' (0xB5) uppercases to itself, where
-        // Unicode simple case maps it to 'Μ' (0x39C).
+        // The quirk: this volume says U+00B5 (micro sign) uppercases to
+        // itself, where Unicode simple case maps it to U+039C (capital mu).
         table[0xB5] = 0xB5;
         table
     }
@@ -180,7 +180,7 @@ mod tests {
     fn simple_fold_compares_case_insensitively() {
         let fold = CaseFold::Simple;
         assert!(fold.eq("Report.PDF", "report.pdf"));
-        assert!(fold.eq("ÉCOLE", "école"));
+        assert!(fold.eq("\u{c9}COLE", "\u{e9}cole"));
         assert!(!fold.eq("a", "b"));
         assert!(!fold.eq("abc", "ab"));
     }
@@ -190,9 +190,9 @@ mod tests {
         let fold = CaseFold::from_upcase(quirky_table());
         assert!(matches!(fold, CaseFold::Table(_)));
         assert!(fold.eq("ABC", "abc"));
-        // The volume's rule wins over Unicode's.
-        assert_eq!(fold.fold('µ'), 'µ');
-        assert_eq!(CaseFold::Simple.fold('µ'), 'Μ');
+        // The volume's rule wins over Unicode's (micro sign, capital mu).
+        assert_eq!(fold.fold('\u{b5}'), '\u{b5}');
+        assert_eq!(CaseFold::Simple.fold('\u{b5}'), '\u{39c}');
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn supplementary_plane_chars_pass_through() {
         let fold = CaseFold::from_upcase(quirky_table());
-        assert_eq!(fold.fold('🦀'), '🦀');
-        assert!(fold.eq("crab-🦀", "CRAB-🦀"));
+        assert_eq!(fold.fold('\u{1f980}'), '\u{1f980}');
+        assert!(fold.eq("crab-\u{1f980}", "CRAB-\u{1f980}"));
     }
 }

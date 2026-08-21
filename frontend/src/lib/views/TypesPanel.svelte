@@ -1,5 +1,5 @@
 <!--
-  TypesPanel.svelte — WizTree's "File Types" tab (features.md §4.3).
+  TypesPanel.svelte - WizTree's "File Types" tab (features.md sec 4.3).
 
   What kind of thing is eating the disk, aggregated by extension in Rust.
   Ticking types dims everything else in the treemap and applies the same

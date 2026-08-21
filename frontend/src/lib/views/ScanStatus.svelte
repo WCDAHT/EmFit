@@ -1,5 +1,5 @@
 <!--
-  ScanStatus.svelte — the elevation banner and per-target scan status chips.
+  ScanStatus.svelte - the elevation banner and per-target scan status chips.
   Renders nothing when there is nothing to say, so the layout stays flat.
 -->
 <script lang="ts">
@@ -12,9 +12,9 @@
     switch (s.phase) {
       case "scanning":
         if (s.total !== null && s.total > 0 && s.done > 0) {
-          return `${s.message} — ${s.done.toLocaleString()} / ${s.total.toLocaleString()}`;
+          return `${s.message} - ${s.done.toLocaleString()} / ${s.total.toLocaleString()}`;
         }
-        return s.done > 0 ? `${s.message} — ${s.done.toLocaleString()}` : s.message;
+        return s.done > 0 ? `${s.message} - ${s.done.toLocaleString()}` : s.message;
       case "done":
         return s.summary ?? "done";
       case "error":
@@ -29,7 +29,7 @@
 
 {#if !session.elevated}
   <div class="banner">
-    <span>Not running as Administrator — raw volume scans will be refused.</span>
+    <span>Not running as Administrator - raw volume scans will be refused.</span>
     <button onclick={() => void relaunchElevated()}>Relaunch elevated</button>
   </div>
 {/if}
@@ -42,7 +42,7 @@
         <span class="name">{t.label}</span>
         {#if s.phase === "scanning"}
           <!-- Native <progress>: with a total it is determinate; without a
-               value it renders the indeterminate animation — exactly the
+               value it renders the indeterminate animation - exactly the
                "indeterminate until the file count is known" behavior. -->
           {#if s.total !== null && s.total > 0}
             <progress max={s.total} value={Math.min(s.done, s.total)}></progress>

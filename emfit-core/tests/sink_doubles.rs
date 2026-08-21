@@ -155,7 +155,7 @@ fn validation_catches_a_scanner_pushing_paths_instead_of_names() {
         }]
     );
 
-    // The entry still reached the builder — validation observes, it does not
+    // The entry still reached the builder - validation observes, it does not
     // filter, so the index is exactly what an unvalidated run would produce.
     let (index, _) = sink.into_inner().finish();
     assert_eq!(index.len(), 3);

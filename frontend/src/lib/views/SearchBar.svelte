@@ -1,5 +1,5 @@
 <!--
-  SearchBar.svelte — the search box and its filters (features.md §2).
+  SearchBar.svelte - the search box and its filters (features.md sec 2).
 
   One text input carries the whole query grammar: substrings, wildcards,
   `;`-OR terms, backtick path scoping, and the inline `ext:` `size:` `dm:`
@@ -26,7 +26,7 @@
   let presetName = $state("");
 
   onMount(async () => {
-    // Ctrl+F at the app root lands here (STANDARDS §3.7).
+    // Ctrl+F at the app root lands here (STANDARDS sec 3.7).
     hooks.focusSearch = () => searchInput?.focus();
     presets = await listPresets();
   });
@@ -54,7 +54,7 @@
         oninput={() => queryChanged()}
         type="text"
         spellcheck="false"
-        placeholder={"Search — try  *.pdf;*.docx   ext:iso size:>1gb   `C:\\Users` report   (Ctrl+F)"}
+        placeholder={"Search - try  *.pdf;*.docx   ext:iso size:>1gb   `C:\\Users` report   (Ctrl+F)"}
         aria-label="Search"
       />
       {#if session.text}
@@ -170,7 +170,7 @@
     <div class="meta">
       <span class="results">{resultLine}</span>
       {#each session.warnings as warning (warning)}
-        <span class="warning" title={warning}>⚠ {warning}</span>
+        <span class="warning" title={warning}>! {warning}</span>
       {/each}
     </div>
   {/if}

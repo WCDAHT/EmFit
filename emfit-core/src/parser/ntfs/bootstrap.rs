@@ -1,12 +1,12 @@
 //! Finding the MFT by reading the MFT.
 //!
-//! Record 0 is `$MFT` — the table describing itself. Its `$DATA` run list is
+//! Record 0 is `$MFT` - the table describing itself. Its `$DATA` run list is
 //! the extent map, and its data size is how much of the table is real rather
 //! than merely allocated. Getting at it is a small bootstrap: the boot sector
 //! says where the table *starts*, which is enough to read record 0, which then
 //! says where the rest of it is.
 //!
-//! This is the route that works everywhere — a disk image, an unmounted
+//! This is the route that works everywhere - a disk image, an unmounted
 //! volume, a volume whose driver will not answer. Asking the driver
 //! ([`retrieval`]) is faster when it is available, but it is the optimization,
 //! not the foundation.
@@ -15,7 +15,7 @@
 //!
 //! On a badly fragmented volume `$MFT`'s own run list outgrows record 0 and
 //! spills into extension records, which live in the low-numbered records right
-//! behind it. Reading only record 0 then yields a *prefix* of the map — the
+//! behind it. Reading only record 0 then yields a *prefix* of the map - the
 //! same silent truncation as a single retrieval-pointers call. Reading the
 //! first several records in one go costs one I/O and covers the case.
 //!
@@ -49,8 +49,8 @@ pub struct MftLayout {
     /// high-water mark of how many record slots have ever been written. The
     /// live count comes from [`bitmap`].
     ///
-    /// It is still the right bound for the sweep — every live record is below
-    /// it — so this is how far to read.
+    /// It is still the right bound for the sweep - every live record is below
+    /// it - so this is how far to read.
     ///
     /// [`bitmap`]: crate::parser::ntfs::bitmap
     pub data_size: u64,
@@ -61,7 +61,7 @@ pub struct MftLayout {
 }
 
 impl MftLayout {
-    /// Records backed by written data — the bound for the sweep, and an
+    /// Records backed by written data - the bound for the sweep, and an
     /// **upper bound** on the file count rather than the count itself.
     pub fn records_to_scan(&self) -> u64 {
         self.data_size / u64::from(self.boot.bytes_per_record)

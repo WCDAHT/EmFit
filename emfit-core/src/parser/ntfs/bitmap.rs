@@ -4,7 +4,7 @@
 //! Reading it costs a single ~130 KB I/O and answers a question the sweep
 //! otherwise cannot answer until it finishes: **how many files are actually
 //! here**. `$MFT`'s data size only says how many record slots have ever been
-//! written — the table never shrinks, so on a volume that has had many files
+//! written - the table never shrinks, so on a volume that has had many files
 //! deleted it overstates the count, sometimes badly.
 //!
 //! Knowing the real figure up front buys two things:
@@ -38,7 +38,7 @@ impl MftBitmap {
 
     /// Whether the record is allocated to a file.
     ///
-    /// Records past the end of the bitmap read as free — a bitmap shorter than
+    /// Records past the end of the bitmap read as free - a bitmap shorter than
     /// the table means the tail has never been allocated.
     pub fn is_in_use(&self, record_number: u64) -> bool {
         let byte = (record_number / 8) as usize;
@@ -63,7 +63,7 @@ impl MftBitmap {
 
 /// Read a non-resident attribute's contents by following its data runs.
 ///
-/// Reads each run whole — runs are cluster-aligned, and clusters are a
+/// Reads each run whole - runs are cluster-aligned, and clusters are a
 /// multiple of the sector size, so every read stays aligned for an unbuffered
 /// source. Sparse runs contribute zeroes without any I/O.
 pub fn read_non_resident(
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn bits_map_to_records_least_significant_first() {
-        // 0b0000_0101 → records 0 and 2; 0b1000_0000 → record 15.
+        // 0b0000_0101 -> records 0 and 2; 0b1000_0000 -> record 15.
         let bitmap = MftBitmap::from_bytes(vec![0b0000_0101, 0b1000_0000]);
 
         assert!(bitmap.is_in_use(0));

@@ -6,7 +6,7 @@
 //! branching on a filesystem enum, each scanner declares its capabilities and
 //! the rest of the app reads them as data.
 //!
-//! See `architecture.md` §6.
+//! See `architecture.md` sec 6.
 
 /// Capabilities of one scanned volume, declared by the scanner that read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub struct VolumeCaps {
     pub case_sensitive: bool,
 
     /// Files have a stable, meaningful identity (MFT record number, inode
-    /// number). False on FAT32, where directory entries carry no id — which
+    /// number). False on FAT32, where directory entries carry no id - which
     /// disables open-by-id and incremental diffing.
     pub has_stable_ids: bool,
 

@@ -8,7 +8,7 @@
     /* Treat every file as a module; required by Vite/esbuild. */
     "isolatedModules": true,
     "moduleResolution": "bundler",
-    /* Strictness is the point of choosing TS — keep it on. */
+    /* Strictness is the point of choosing TS - keep it on. */
     "strict": true,
     "skipLibCheck": true,
     /* Surface unused code as errors so dead glue doesn't accumulate. */

@@ -1,7 +1,7 @@
 //! Volume discovery against the machine the tests run on.
 //!
 //! Necessarily environment-dependent, so the assertions are about invariants
-//! that hold on any Windows host — well-formed paths, self-consistent flags —
+//! that hold on any Windows host - well-formed paths, self-consistent flags -
 //! rather than about a particular drive layout. The pure logic (path parsing,
 //! filesystem classification) is unit-tested in `model::volume`.
 
@@ -66,7 +66,7 @@ mod windows {
                     assert_eq!(v.device_path(), format!(r"\\.\{letter}:"));
                     assert_eq!(v.display_name(), format!("{letter}:"));
                 }
-                // Letterless volumes are normal — recovery and EFI partitions
+                // Letterless volumes are normal - recovery and EFI partitions
                 // are the common case, and are exactly what a drive-letter
                 // enumeration would miss.
                 None => assert!(v.device_path().starts_with(r"\\?\Volume{")),
@@ -166,7 +166,7 @@ mod other_platforms {
 
     #[test]
     fn enumeration_is_unsupported_but_callable() {
-        // Callers get an error they can report, not a compile error — no
+        // Callers get an error they can report, not a compile error - no
         // `cfg` needed at the call site.
         assert!(matches!(
             volume::enumerate(),

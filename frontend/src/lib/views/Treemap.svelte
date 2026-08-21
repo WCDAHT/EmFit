@@ -1,21 +1,21 @@
 <!--
-  Treemap.svelte — the WizTree-style map (features.md §4.2).
+  Treemap.svelte - the WizTree-style map (features.md sec 4.2).
 
   All layout happens in Rust: this component sends the canvas size, drill
-  point, and depth, and paints the flat rectangle list it gets back —
+  point, and depth, and paints the flat rectangle list it gets back -
   WizTree's grammar (logs/wiztree_treemap_algorithm.md): volumes are
   full-height strips; labelled folders carry a RESERVED header strip
   (`name\ (999 GiB)`) carved from the layout, framed by the two-tone 3D
-  frame — 0x303030 left+bottom, 0x404040 right+top (§5.4); labelled files
-  get a `name (size)` caption over their block (§5.3). Solid blocks are
-  CUSHION-SHADED (§4 ridge model + the per-pixel shader recovered in
-  logs/secretClaude.txt §7, incl. its ×0.8 right/bottom edge bevel) by a
-  software rasterizer into one ImageData — a cost paid only when the scene
+  frame - 0x303030 left+bottom, 0x404040 right+top (sec 5.4); labelled files
+  get a `name (size)` caption over their block (sec 5.3). Solid blocks are
+  CUSHION-SHADED (sec 4 ridge model + the per-pixel shader recovered in
+  logs/secretClaude.txt sec 7, incl. its x0.8 right/bottom edge bevel) by a
+  software rasterizer into one ImageData - a cost paid only when the scene
   itself changes; hover/focus recomposite the cached layer.
 
   Colors come from the persisted config: WizTree-style size buckets, or the
   extension category palette. Interactions: hover tooltip (clamped to the
-  window — a DOM tooltip cannot leave the webview frame), click focuses and
+  window - a DOM tooltip cannot leave the webview frame), click focuses and
   reveals in the folder tree, double-click drills with a short zoom,
   Backspace / Alt+Left / breadcrumb go back up.
 -->
@@ -26,12 +26,12 @@
   import type { NodeInfoDto, TreemapRectDto, TypeRowDto } from "../types";
   import Icon from "../components/Icon.svelte";
 
-  /** Folder header strip height — must match `HEADER_PX` in Rust (§5.4). */
+  /** Folder header strip height - must match `HEADER_PX` in Rust (sec 5.4). */
   const HEADER_PX = 14;
 
-  /** WizTree's 13-entry file-type palette (doc §1.1, `+0x46f0`). In ranked
+  /** WizTree's 13-entry file-type palette (doc sec 1.1, `+0x46f0`). In ranked
    *  mode the extension with the most allocated bytes gets [0], the next
-   *  [1], … ; every extension past the list takes the LAST (gray) entry.
+   *  [1], ... ; every extension past the list takes the LAST (gray) entry.
    *  A future milestone makes the list and per-extension assignments
    *  user-configurable in settings (see `TreemapConfig` in Rust). */
   const WIZ_PALETTE = [
@@ -51,7 +51,7 @@
   let cssH = $state(0);
 
   // $state.raw: reassignment is reactive, but the 26k rect objects stay
-  // plain — iterating proxied objects costs a proxy trap per property read,
+  // plain - iterating proxied objects costs a proxy trap per property read,
   // which at scene scale is the difference between 5ms and 100ms+.
   let rects: TreemapRectDto[] = $state.raw([]);
   let crumbs: Crumb[] = $state([]);
@@ -80,7 +80,7 @@
   });
 
   /** Ranked mode's color assignment: the top extensions by allocated bytes,
-   *  in rank order (row i → WIZ_PALETTE[i]). Refreshed per view epoch —
+   *  in rank order (row i -> WIZ_PALETTE[i]). Refreshed per view epoch -
    *  NOT per resize/drill, so colors stay stable while browsing, like
    *  WizTree's. */
   let extRows: TypeRowDto[] = $state.raw([]);
@@ -101,10 +101,10 @@
   //
   // Coalesced through rAF: a layout refetch and the extension-rank fetch
   // resolve back-to-back, and without coalescing each triggered a FULL
-  // scene rasterization — a profiler showed the whole pipeline (grid,
+  // scene rasterization - a profiler showed the whole pipeline (grid,
   // palette, per-pixel cushion pass) running twice per update. The rAF
   // callback runs untracked, so every reactive value drawScene consumes
-  // MUST be listed here (that includes sizeUnit — the labels format sizes).
+  // MUST be listed here (that includes sizeUnit - the labels format sizes).
   let sceneQueued = false;
   function scheduleScene() {
     if (sceneQueued) return;
@@ -177,11 +177,11 @@
   }
 
   /** Everything the per-rect color decision needs, resolved ONCE per scene:
-   *  plain structures instead of proxied session state (26k rects × proxied
+   *  plain structures instead of proxied session state (26k rects x proxied
    *  reads is real money), and CSS variables read once, not per rect. */
   interface PaintPalette {
     mode: "ranked" | "extension";
-    /** extension → palette rank, from the view-epoch type breakdown. */
+    /** extension -> palette rank, from the view-epoch type breakdown. */
     rank: Map<string, number>;
     wiz: [number, number, number][];
     categories: [number, number, number][]; // slots 1..8
@@ -194,7 +194,7 @@
     const rank = new Map<string, number>();
     extRows.forEach((row, i) => rank.set(row.extension, i));
     // parseColor memoizes, so re-resolving the static palettes per scene is
-    // ~free — what matters is that the PER-RECT path below touches only
+    // ~free - what matters is that the PER-RECT path below touches only
     // numbers, never CSS strings (the string version profiled ~2ms/scene).
     return {
       mode: session.colorMode,
@@ -214,8 +214,8 @@
   function leafRgb(r: TreemapRectDto, p: PaintPalette): [number, number, number] {
     if (r.synthetic) return p.synthetic;
     if (p.mode === "ranked") {
-      // WizTree's scheme: rank i → palette[i]; unranked extensions — and
-      // unexpanded folders standing in for whole subtrees — take the last
+      // WizTree's scheme: rank i -> palette[i]; unranked extensions - and
+      // unexpanded folders standing in for whole subtrees - take the last
       // (gray) entry.
       if (r.is_dir) return p.wiz[p.wiz.length - 1];
       const rank = p.rank.get(extensionOf(r.name));
@@ -230,17 +230,17 @@
   // cushion shading (van Wijk & van de Wetering, as WizTree implements it)
   // -------------------------------------------------------------------------
   //
-  // The ridge/accumulation model is doc §4: every node adds a parabolic
+  // The ridge/accumulation model is doc sec 4: every node adds a parabolic
   // ridge over its own rectangle to a COPY of its parent's surface
   // coefficients, with height damped by F at every descent; only the
   // depth-0 drive strip skips its own ridge (IsChild=1). (The current doc
   // words the gate as "folders only", but that literal reading leaves
-  // root-level files on a flat zero surface — real WizTree, the earlier
+  // root-level files on a flat zero surface - real WizTree, the earlier
   // decompilation pass, and van Wijk all ridge leaves too.) The per-pixel
-  // shader is the one recovered in logs/secretClaude.txt §7: surface
+  // shader is the one recovered in logs/secretClaude.txt sec 7: surface
   // normal from the coefficient derivatives, normalized, dotted with an
   // unnormalized light vector, ceiling-clamped at 1, right/bottom edge
-  // bevelled ×0.8 (blocks under 5px per side skip the bevel).
+  // bevelled x0.8 (blocks under 5px per side skip the bevel).
   //
   // H0/F/L are the values WizTree reads from its binary; the docs pin them
   // only as "SequoiaView-lineage" reference values, used here. IA/IC/RATIO
@@ -266,7 +266,7 @@
   const surfacePool: Surface[] = [];
   const scratchSurface: Surface = new Float64Array(4);
 
-  /** `dst = src + ridge(rect, h)` (doc §4). The per-axis gate is WizTree's:
+  /** `dst = src + ridge(rect, h)` (doc sec 4). The per-axis gate is WizTree's:
    *  only when the span rounds to a nonzero width. */
   function ridgeInto(dst: Surface, src: Surface, r: TreemapRectDto, h: number) {
     dst.set(src);
@@ -282,7 +282,7 @@
     }
   }
 
-  /** Ridge height at depth d — `H0·F^d`, memoized (no `**` per rect). */
+  /** Ridge height at depth d - `H0*F^d`, memoized (no `**` per rect). */
   const hPow: number[] = [H0];
   function hAt(depth: number): number {
     while (hPow.length <= depth) hPow.push(hPow[hPow.length - 1] * F);
@@ -291,7 +291,7 @@
 
   const rgbCache = new Map<string, [number, number, number]>();
 
-  /** CSS color → [r, g, b]. Handles #rgb/#rrggbb and rgb()/rgba() — the
+  /** CSS color -> [r, g, b]. Handles #rgb/#rrggbb and rgb()/rgba() - the
    *  forms our theme variables resolve to. */
   function parseColor(css: string): [number, number, number] {
     const cached = rgbCache.get(css);
@@ -326,7 +326,7 @@
 
   /** The offscreen scene layer and the hit-test grid, rebuilt with it. */
   let scene: HTMLCanvasElement | null = null;
-  /** Reused pixel buffer for the cushion pass (8MB at 1080p — worth reusing). */
+  /** Reused pixel buffer for the cushion pass (8MB at 1080p - worth reusing). */
   let sceneImg: ImageData | null = null;
   const CELL = 64;
   let grid: TreemapRectDto[][] = [];
@@ -353,7 +353,7 @@
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // The hit-test grid is rebuilt off the paint path (idle callback): it
-    // profiled at ~3ms and nothing needs it synchronously — hover and the
+    // profiled at ~3ms and nothing needs it synchronously - hover and the
     // focus/deleted outlines tolerate one briefly-stale frame.
     scheduleGridBuild();
 
@@ -367,7 +367,7 @@
     ctx.font = "10px Inter, sans-serif";
     ctx.textBaseline = "top";
 
-    // Hairlines are one DEVICE pixel, not one CSS pixel — on a 150%-scaled
+    // Hairlines are one DEVICE pixel, not one CSS pixel - on a 150%-scaled
     // display that is a third thinner. Thinner than this isn't physically
     // possible: the antialiaser would render a sub-pixel line as a full
     // pixel at lower opacity (fainter, not narrower). Coordinates snap to
@@ -379,9 +379,9 @@
     // ---- cushion pass -----------------------------------------------------
     // Software-rasterize every solid block into one ImageData buffer, then
     // put it down in a single call; frames/labels draw on top with vector
-    // ops. Expanded folders rasterize nothing themselves — their ridge only
-    // bends the surface their descendants are shaded with — so the header
-    // strip and 2px margins (§5.4) show the background.
+    // ops. Expanded folders rasterize nothing themselves - their ridge only
+    // bends the surface their descendants are shaded with - so the header
+    // strip and 2px margins (sec 5.4) show the background.
     if (
       !sceneImg ||
       sceneImg.width !== deviceW ||
@@ -397,14 +397,14 @@
       (0xff << 24) | (bg[2] << 16) | (bg[1] << 8) | bg[0],
     );
 
-    /** §7 of the recovered shader: per-pixel normal → light → brightness.
-     *  Bounds round INWARD (trunc(lo+0.5) .. trunc(hi−0.5)) in device px.
+    /** sec 7 of the recovered shader: per-pixel normal -> light -> brightness.
+     *  Bounds round INWARD (trunc(lo+0.5) .. trunc(hi-0.5)) in device px.
      *
      *  Hot loop, strength-reduced: `nx` is linear in the pixel column, so
-     *  it advances by one addition instead of being recomputed (the naïve
-     *  form — a divide and two multiplies per pixel — profiled as the
+     *  it advances by one addition instead of being recomputed (the naive
+     *  form - a divide and two multiplies per pixel - profiled as the
      *  scene's single biggest cost); the dim blend
-     *  `bg + (c·bright − bg)·0.25 = 0.75·bg + 0.25·c·bright` folds into a
+     *  `bg + (c*bright - bg)*0.25 = 0.75*bg + 0.25*c*bright` folds into a
      *  per-rect scale+offset, so the loop is branch-free on it. */
     const invDpr = 1 / dpr;
     const IA_R = IA * RATIO;
@@ -460,8 +460,8 @@
     // Walk the pre-order list once, re-accumulating the surface coefficients
     // WizTree threads through its recursion: a stack keyed by depth, every
     // node adding its own ridge except at depth 0 (the drive strip is
-    // called with IsChild=1). Ridge height at depth d is H0·F^d. Surfaces
-    // live in the per-depth pool — a stack level's array is only read while
+    // called with IsChild=1). Ridge height at depth d is H0*F^d. Surfaces
+    // live in the per-depth pool - a stack level's array is only read while
     // its descendants are processed, so reuse by depth is safe and the walk
     // allocates nothing.
     const stackDepths: number[] = [];
@@ -483,11 +483,11 @@
         continue;
       }
       // Solid block: add the node's OWN ridge, then shade. The current
-      // doc's §4 gate reads "folders only", but taken literally it puts
+      // doc's sec 4 gate reads "folders only", but taken literally it puts
       // every file without a folder ancestor below the root (a drill or
-      // volume root's direct children) on a ZERO surface — normal (0,0,1),
-      // intensity 1.0, a flat bright tile — which real WizTree never shows.
-      // The earlier decompilation (logs/secretClaude.txt §5 step 3) and van
+      // volume root's direct children) on a ZERO surface - normal (0,0,1),
+      // intensity 1.0, a flat bright tile - which real WizTree never shows.
+      // The earlier decompilation (logs/secretClaude.txt sec 5 step 3) and van
       // Wijk's algorithm both ridge EVERY node except the root strip, and
       // that matches WizTree's output: each block is its own pillow.
       let s = parent;
@@ -502,10 +502,10 @@
     }
     ctx.putImageData(sceneImg, 0, 0);
 
-    // Label pass, per §5.3/§5.4. Labelled folder groups get their name in
+    // Label pass, per sec 5.3/sec 5.4. Labelled folder groups get their name in
     // the RESERVED header strip (carved from the layout in Rust, so no
     // child ever collides with it) plus the two-tone 3D frame. File-style
-    // labels — files, aggregates, unexpanded folders — overdraw the block.
+    // labels - files, aggregates, unexpanded folders - overdraw the block.
     // Walked in REVERSE so a parent's frame lands above its descendants'
     // edges (the list is pre-order: reversed, descendants come first).
     // `headed` is Rust's full gate (both thresholds), so a drawn label
@@ -513,9 +513,9 @@
     for (let i = rects.length - 1; i >= 0; i--) {
       const r = rects[i];
       if (r.is_dir && r.expanded) {
-        if (!r.headed) continue; // unlabelled group: no frame, no text (§5.4)
-        // 3D frame around the whole folder cell (§5.4): 0x303030 on the
-        // LEFT + BOTTOM edges, 0x404040 on the RIGHT + TOP — WizTree's
+        if (!r.headed) continue; // unlabelled group: no frame, no text (sec 5.4)
+        // 3D frame around the whole folder cell (sec 5.4): 0x303030 on the
+        // LEFT + BOTTOM edges, 0x404040 on the RIGHT + TOP - WizTree's
         // subtle raised look between nested folders.
         const rx = snap(r.x) + px / 2;
         const ry = snap(r.y) + px / 2;
@@ -533,7 +533,7 @@
         ctx.lineTo(rx + rw, ry);
         ctx.lineTo(rx, ry);
         ctx.stroke();
-        // Header text sits in its own strip on the surface background —
+        // Header text sits in its own strip on the surface background -
         // clipped to the strip (TextRect semantics), never wrapped.
         const label = `${r.name}\\ (${formatSize(r.allocated)})`;
         ctx.save();
@@ -547,7 +547,7 @@
       }
       if (!r.headed) continue;
       // Leaf caption `name (size)`, drawn into the block inset by
-      // {left+4, bottom−2} (§5.3). All-or-nothing is our web adjustment in
+      // {left+4, bottom-2} (sec 5.3). All-or-nothing is our web adjustment in
       // place of TextRect clipping: wrap at spaces into as many lines as
       // the box is tall; if even wrapped it cannot fit, no text at all.
       const label = `${r.is_dir ? `${r.name}\\` : r.name} (${formatSize(r.allocated)})`;
@@ -568,7 +568,7 @@
     }
 
     // NOT composite() directly: a direct call would run inside the scene
-    // effect's tracking scope, and composite reads `hover`/`session.focus` —
+    // effect's tracking scope, and composite reads `hover`/`session.focus` -
     // the whole scene would silently become hover-reactive again (the exact
     // bug a mousemove flame chart caught). The rAF callback runs untracked.
     scheduleComposite();
@@ -583,7 +583,7 @@
     }
   }
 
-  /** Blit the scene and draw only the focus/hover outlines — the whole cost
+  /** Blit the scene and draw only the focus/hover outlines - the whole cost
    *  of a hover change, regardless of how many rects the scene holds. */
   function composite() {
     if (!canvas || !scene) return;
@@ -669,8 +669,8 @@
 
   /** Break `text` at spaces into lines no wider than `availW`, at most as
    *  many lines as fit in `availH`. Returns null when the text cannot fit
-   *  even wrapped — a word alone overflows the width, or the wrapped text
-   *  needs more lines than the box is tall — in which case no text is
+   *  even wrapped - a word alone overflows the width, or the wrapped text
+   *  needs more lines than the box is tall - in which case no text is
    *  drawn at all (no clipped fragments). */
   function wrapToFit(
     ctx: CanvasRenderingContext2D,
@@ -844,7 +844,7 @@
     crumbs = chain.map((id, i) => ({
       vol: target.vol,
       id,
-      name: names[i] ?? "…",
+      name: names[i] ?? "...",
     }));
   }
 
@@ -887,7 +887,7 @@
       All volumes
     </button>
     {#each crumbs as crumb, i (crumb.id)}
-      <span class="sep">›</span>
+      <span class="sep">></span>
       <button class="crumb" onclick={() => crumbClick(i)}>{crumb.name}</button>
     {/each}
     <span class="flex"></span>
@@ -930,7 +930,7 @@
       <div class="tooltip" style:left="{tooltipPos.x}px" style:top="{tooltipPos.y}px">
         <div class="tip-name">{hover.name}</div>
         <div class="tip-detail">
-          {formatSize(hover.allocated)} on disk · {formatSize(hover.size)}
+          {formatSize(hover.allocated)} on disk | {formatSize(hover.size)}
         </div>
         {#if hoverInfo}
           <div class="tip-path">{hoverInfo.path}</div>
@@ -1020,7 +1020,7 @@
     display: block;
     outline: none;
   }
-  /* Drill transition: the stale frame blurs in place — never stretched —
+  /* Drill transition: the stale frame blurs in place - never stretched -
    * until the new layout paints over it. */
   canvas.stale {
     filter: blur(5px);

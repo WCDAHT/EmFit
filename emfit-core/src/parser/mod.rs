@@ -1,6 +1,6 @@
 //! Input format handling, one file per format.
 //!
-//! Per STANDARDS §4.3:
+//! Per STANDARDS sec 4.3:
 //! - For N <= 2 formats: an `enum` plus `match`.
 //! - For N >= 3 (or when variants come from elsewhere): the `Parser` trait
 //!   below plus an explicit `ParserRegistry`. Registration is explicit,
@@ -11,8 +11,8 @@
 //! parsers in `ParserRegistry::default()`.
 //!
 //! For EmFit the "formats" are filesystems. Two orthogonal axes live here
-//! (`architecture.md` §4): [`block`] is *where bytes come from* — a volume, a
-//! physical drive, an image — and the filesystem scanners are *how to
+//! (`architecture.md` sec 4): [`block`] is *where bytes come from* - a volume, a
+//! physical drive, an image - and the filesystem scanners are *how to
 //! interpret them*. The `FsScanner` trait that generalizes the second axis is
 //! deliberately not written until a second scanner exists; until then NTFS
 //! talks to `IndexBuilder` directly, never touching the index's internals.

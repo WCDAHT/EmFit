@@ -6,8 +6,8 @@ import path from 'path';
 //
 // This MUST NOT fail the build. The output file is imported by About.svelte and
 // is gitignored (so it only exists if we write it), so each source is gathered
-// independently and the file is always written. A missing tool — most commonly
-// `cargo-about` not being installed (CI, a fresh clone) — degrades to a note
+// independently and the file is always written. A missing tool - most commonly
+// `cargo-about` not being installed (CI, a fresh clone) - degrades to a note
 // rather than aborting `npm run build`.
 
 const OUT_PATH = './frontend/src/assets/generated-licenses.txt';
@@ -51,7 +51,7 @@ function gatherRustLicenses() {
     console.warn('  (cargo-about unavailable; Rust dependency licenses not generated.');
     console.warn('   Install it with `cargo install cargo-about` to include them.)');
     console.warn(`   ${(e.message || '').split('\n')[0]}`);
-    return '(Rust dependency licenses were not generated — cargo-about is not installed.)\n';
+    return '(Rust dependency licenses were not generated - cargo-about is not installed.)\n';
   } finally {
     try {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
@@ -86,9 +86,9 @@ ${rustLicenses}
 try {
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   fs.writeFileSync(OUT_PATH, combined);
-  console.log(`✅ Licenses written to ${OUT_PATH}`);
+  console.log(`OK Licenses written to ${OUT_PATH}`);
 } catch (e) {
   // Even this is non-fatal: if a stale file already exists the build can still
   // proceed; only warn so the build isn't blocked by a credits hiccup.
-  console.warn(`⚠️  Could not write ${OUT_PATH}: ${e.message}`);
+  console.warn(`!  Could not write ${OUT_PATH}: ${e.message}`);
 }

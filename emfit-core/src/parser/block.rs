@@ -1,16 +1,16 @@
 //! Where bytes come from, independent of what they mean.
 //!
-//! One of the two axes in `architecture.md` §4. A [`BlockSource`] answers
+//! One of the two axes in `architecture.md` sec 4. A [`BlockSource`] answers
 //! "give me the bytes at this offset" and nothing else; deciding whether those
 //! bytes are an MFT record or an ext4 inode is the scanner's job. Keeping the
 //! two apart is what makes NTFS-in-an-image and ext4-in-an-image fall out for
-//! free — v1 fused them, embedding `NtfsVolumeData` inside its I/O enum, so
+//! free - v1 fused them, embedding `NtfsVolumeData` inside its I/O enum, so
 //! opening an image implied NTFS.
 //!
 //! # Positional reads
 //!
 //! [`BlockSource::read_at`] takes `&self`, not `&mut self`. Underneath it uses
-//! the platform's positional read — `seek_read` on Windows, `read_at` on Unix —
+//! the platform's positional read - `seek_read` on Windows, `read_at` on Unix -
 //! which carries the offset in the call rather than mutating a shared file
 //! pointer. Several threads can therefore read one source concurrently with no
 //! lock. v1 could not: it used `SetFilePointerEx` followed by `ReadFile`, a
@@ -127,13 +127,13 @@ impl FileBlockSource {
         })
     }
 
-    /// Open a raw Windows device — `\\.\C:` for a volume, `\\.\PhysicalDrive0`
+    /// Open a raw Windows device - `\\.\C:` for a volume, `\\.\PhysicalDrive0`
     /// for a whole disk.
     ///
     /// Opened unbuffered, which is what makes bulk metadata reads fast: the
     /// cache is pure overhead when sweeping millions of records once. The cost
     /// is that every read must be sector-aligned in offset, length, and buffer
-    /// address — see [`AlignedBuf`].
+    /// address - see [`AlignedBuf`].
     ///
     /// Requires Administrator. Sharing is permissive because the volume is
     /// live and in use by everything else on the system.
@@ -261,7 +261,7 @@ impl BlockSource for FileBlockSource {
 
         // A tail read may be sector-padded past the end of the partition and
         // so pull in bytes belonging to whatever follows. The read itself is
-        // fine — the buffer has to stay aligned — but we must not report those
+        // fine - the buffer has to stay aligned - but we must not report those
         // bytes as ours.
         if let Some(span) = self.span {
             let remaining = (span - offset).min(got as u64);
@@ -370,7 +370,7 @@ impl AlignedBuf {
 }
 
 impl std::fmt::Debug for AlignedBuf {
-    /// Shows the shape, never the contents — these buffers hold megabytes.
+    /// Shows the shape, never the contents - these buffers hold megabytes.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AlignedBuf")
             .field("len", &self.len)

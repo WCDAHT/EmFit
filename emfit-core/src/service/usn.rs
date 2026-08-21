@@ -1,20 +1,20 @@
-//! USN change-journal reader — deletion watching (roadmap M5, rescoped
+//! USN change-journal reader - deletion watching (roadmap M5, rescoped
 //! 2026-07-30).
 //!
-//! The watcher observes exactly one thing: **file deletions** — in both
+//! The watcher observes exactly one thing: **file deletions** - in both
 //! forms. Shift+Del (and emptying the bin) is a true `FILE_DELETE`; plain
 //! Del is NOT a delete at the filesystem level: the shell *renames* the
 //! file into `$Recycle.Bin\<SID>\`, which the journal reports as
 //! `RENAME_NEW_NAME`. The watcher therefore subscribes to both bits and
 //! reports raw events with the post-event parent; the caller classifies a
 //! rename as "recycled" when the new parent is a bin directory, and
-//! ignores every other rename. A deleted node is *marked*, never removed —
+//! ignores every other rename. A deleted node is *marked*, never removed -
 //! no sizes re-roll, creations are invisible, and a path reappearing (or a
 //! restore from the bin) does not clear its mark; only a rescan does.
 //!
 //! [`UsnWatcher::open`] snapshots the journal's current position, so only
 //! deletions from that moment forward are reported (anything between scan
-//! completion and watcher start is missed — the next rescan reconciles).
+//! completion and watcher start is missed - the next rescan reconciles).
 //! [`UsnWatcher::poll`] is non-blocking and meant for a ~1 s cadence from a
 //! caller-owned thread; it returns the deleted file reference numbers,
 //! which map onto index nodes via [`Index::native_id`].
@@ -30,7 +30,7 @@
 use crate::error::Result;
 
 /// One journal record the watcher cares about. `reason` carries the raw
-/// bits; `parent_frn` is where the file lives *after* the event — which is
+/// bits; `parent_frn` is where the file lives *after* the event - which is
 /// what lets the caller tell a Recycle-Bin move (parent = a bin directory)
 /// from an ordinary rename.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub enum UsnPoll {
 /// emptied bin, direct deletion).
 pub const REASON_FILE_DELETE: u32 = 0x0000_0200;
 /// `USN_REASON_RENAME_NEW_NAME`: the file got a new name/location. Plain
-/// Del is THIS, not a delete — the shell "deletes" to the bin by renaming
+/// Del is THIS, not a delete - the shell "deletes" to the bin by renaming
 /// into `$Recycle.Bin\<SID>\`, so recycle detection lives on this bit.
 pub const REASON_RENAME_NEW_NAME: u32 = 0x0000_2000;
 
@@ -173,7 +173,7 @@ mod windows_impl {
 
     /// Journal-loss codes that mean "gap", not "failure":
     /// entry deleted from under us (1181), journal being deleted (1178),
-    /// journal not active (1179), and invalid-parameter (87) — what a
+    /// journal not active (1179), and invalid-parameter (87) - what a
     /// changed journal id surfaces as.
     const GAP_CODES: [u32; 4] = [1181, 1178, 1179, 87];
 
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn renames_carry_their_new_parent() {
-        // A recycle is a rename whose new parent is the bin — the parent is
+        // A recycle is a rename whose new parent is the bin - the parent is
         // exactly what the caller classifies on.
         let mut buf = 9i64.to_le_bytes().to_vec();
         push_record(&mut buf, 555, 0xBEEF, REASON_RENAME_NEW_NAME, 60);

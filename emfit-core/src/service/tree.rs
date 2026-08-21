@@ -1,6 +1,6 @@
-//! Folder-tree rows: the WizTree-style hierarchical pane (features.md §4.1).
+//! Folder-tree rows: the WizTree-style hierarchical pane (features.md sec 4.1).
 //!
-//! Children are materialized **lazily from the CSR ranges** — the frontend
+//! Children are materialized **lazily from the CSR ranges** - the frontend
 //! asks for one directory's children when it expands, and gets rows sorted
 //! largest-first with everything the pane renders: sizes, percent-of-parent
 //! for the inline proportional bar, and subtree counts. Expanding a 100k-child
@@ -22,13 +22,13 @@ pub struct TreeRow {
     pub allocated: u64,
     pub size_display: String,
     pub allocated_display: String,
-    /// Share of the parent's allocated bytes, 0..=100 — drives the inline bar.
+    /// Share of the parent's allocated bytes, 0..=100 - drives the inline bar.
     pub percent_of_parent: f32,
     pub files: u32,
     pub dirs: u32,
     /// `files + dirs` for a directory (its Items column); 0 for a file.
     pub items: u32,
-    /// Raw mtime, nanoseconds since the Unix epoch (0 = unknown) — the sort
+    /// Raw mtime, nanoseconds since the Unix epoch (0 = unknown) - the sort
     /// key behind `modified_display`.
     pub modified: i64,
     pub modified_display: String,
@@ -90,7 +90,7 @@ pub fn children(indices: &[&Index], vol: u16, id: u32) -> Vec<TreeRow> {
         .collect()
 }
 
-/// Node ids from the root down to `id`, inclusive — what a "reveal in tree"
+/// Node ids from the root down to `id`, inclusive - what a "reveal in tree"
 /// needs to expand.
 pub fn lineage(indices: &[&Index], vol: u16, id: u32) -> Vec<u32> {
     let Some(index) = indices.get(vol as usize) else {
@@ -190,7 +190,7 @@ mod tests {
         }
     }
 
-    /// C:\ → docs{a:600, sub{b:200}}, big.iso:1200
+    /// C:\ -> docs{a:600, sub{b:200}}, big.iso:1200
     fn index() -> Index {
         let caps = crate::service::scan::ntfs_caps("C:".to_string());
         let mut b = IndexBuilder::new(caps, CancellationToken::new());

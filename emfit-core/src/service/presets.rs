@@ -1,20 +1,20 @@
-//! Preset filters, in Everything's `Filters.csv` format (features.md §2).
+//! Preset filters, in Everything's `Filters.csv` format (features.md sec 2).
 //!
-//! A preset is a named search fragment — `Audio` is `ext:mp3;flac;…` — that
+//! A preset is a named search fragment - `Audio` is `ext:mp3;flac;...` - that
 //! the UI offers as a dropdown. The file format is kept so users can drop in
 //! their own `Filters.csv`; the built-in set below matches what v1 shipped
 //! (Everything's stock filters).
 //!
 //! The format is a CSV with a header row; the columns we read are `Name` and
 //! `Search`. Other columns (`Case`, `Whole Word`, `Path`, `Diacritics`,
-//! `Regex`, `Macro`, `Key`) are accepted and currently ignored — v1 parsed
+//! `Regex`, `Macro`, `Key`) are accepted and currently ignored - v1 parsed
 //! and ignored them too, and honoring them is listed for later milestones.
 
 /// One preset: a display name and the search fragment it applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preset {
     pub name: String,
-    /// A query fragment in the same grammar as the search box (`ext:…`,
+    /// A query fragment in the same grammar as the search box (`ext:...`,
     /// `folder:`), prepended to the user's query when the preset is active.
     pub search: String,
 }
@@ -32,7 +32,7 @@ Picture,0,0,0,0,0,ext:ani;bmp;gif;ico;jpe;jpeg;jpg;pcx;png;psd;tga;tif;tiff;webp
 Video,0,0,0,0,0,ext:3g2;3gp;3gp2;3gpp;amr;amv;asf;avi;bdmv;bik;d2v;divx;drc;dsa;dsm;dss;dsv;evo;f4v;flc;fli;flic;flv;hdmov;ifo;ivf;m1v;m2p;m2t;m2ts;m2v;m4b;m4p;m4v;mkv;mp2v;mp4;mp4v;mpe;mpeg;mpg;mpls;mpv2;mpv4;mov;mts;ogm;ogv;pss;pva;qt;ram;ratdvd;rm;rmm;rmvb;roq;rpm;smil;smk;swf;tp;tpr;ts;vob;vp3;wm;wmp;wmv,video:,
 ";
 
-/// Parse a `Filters.csv`. Unreadable lines are skipped — a user-edited file
+/// Parse a `Filters.csv`. Unreadable lines are skipped - a user-edited file
 /// with one bad row should not lose the other seven presets.
 pub fn parse(csv: &str) -> Vec<Preset> {
     let mut lines = csv.lines();

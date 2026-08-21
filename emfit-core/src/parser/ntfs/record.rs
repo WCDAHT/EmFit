@@ -2,7 +2,7 @@
 //!
 //! A record is a 48-byte header followed by a chain of self-describing
 //! attributes, each carrying its own length. Everything about a file is in
-//! there — name, parent, timestamps, and either its contents or a map of where
+//! there - name, parent, timestamps, and either its contents or a map of where
 //! its contents are.
 //!
 //! # The fixup array, and why skipping it corrupts names
@@ -15,7 +15,7 @@
 //!
 //! Two bytes per 512 lands roughly in the middle of a 1024-byte record, which
 //! is exactly where filenames live. Skip the repair and names come out with
-//! two bytes of garbage in the middle — plausible enough to survive parsing
+//! two bytes of garbage in the middle - plausible enough to survive parsing
 //! and wrong enough to be useless.
 //!
 //! Records obtained through `FSCTL_GET_NTFS_FILE_RECORD` are repaired by the
@@ -57,7 +57,7 @@ pub struct RecordHeader {
     pub flags: u16,
     /// Bytes of this record actually used.
     pub used_size: u32,
-    /// Bytes allocated to it — the record size.
+    /// Bytes allocated to it - the record size.
     pub allocated_size: u32,
     /// Reference to the base record, when this is an extension record holding
     /// attributes that overflowed. Zero when this *is* a base record.
@@ -72,7 +72,7 @@ impl RecordHeader {
     /// nothing, allocates nothing.
     ///
     /// The sweep calls this on every record and skips most of them without
-    /// paying for fixup or attribute walking — on a used volume a large share
+    /// paying for fixup or attribute walking - on a used volume a large share
     /// of the MFT is free records holding stale bytes.
     pub fn parse(buf: &[u8]) -> Result<Self> {
         if buf.len() < HEADER_LEN {
@@ -123,8 +123,8 @@ impl RecordHeader {
     /// The base record this one extends, or `None` when this is itself a base
     /// record.
     ///
-    /// A file with more attributes than fit in 1024 bytes — many hard links,
-    /// a heavily fragmented `$DATA` — spills into extension records. Those
+    /// A file with more attributes than fit in 1024 bytes - many hard links,
+    /// a heavily fragmented `$DATA` - spills into extension records. Those
     /// carry a full header and appear in the sweep like any other record, but
     /// belong to the file named here.
     pub fn base_record(&self) -> Option<u64> {
@@ -204,7 +204,7 @@ impl<'a> Record<'a> {
 /// Put back the bytes NTFS displaced with its check value.
 ///
 /// Verifies each sector's check value before restoring. A mismatch means a
-/// torn write — the record is a mixture of two generations and cannot be
+/// torn write - the record is a mixture of two generations and cannot be
 /// trusted, which is exactly what the mechanism exists to detect. WizTree
 /// restores without verifying, trading that detection for a couple of
 /// comparisons per record; we keep it, because a wrong filename that looks
@@ -230,7 +230,7 @@ pub fn apply_fixup(buf: &mut [u8], header: &RecordHeader, bytes_per_sector: u32)
     if usa_offset < HEADER_LEN || usa_offset + usa_count * 2 > buf.len() {
         return Err(Error::Parse {
             format: "MFT record fixup".to_string(),
-            message: format!("array at {usa_offset} × {usa_count} runs outside the record"),
+            message: format!("array at {usa_offset} x {usa_count} runs outside the record"),
         });
     }
 
@@ -259,7 +259,7 @@ pub fn apply_fixup(buf: &mut [u8], header: &RecordHeader, bytes_per_sector: u32)
             return Err(Error::Parse {
                 format: "MFT record fixup".to_string(),
                 message: format!(
-                    "sector {i} ends with {found:#06X}, expected {check:#06X} — torn write"
+                    "sector {i} ends with {found:#06X}, expected {check:#06X} - torn write"
                 ),
             });
         }

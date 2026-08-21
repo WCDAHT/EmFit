@@ -3,7 +3,7 @@
 //! Builds a small NTFS-shaped image on disk, reads it back through the real
 //! [`FileBlockSource`], parses the boot sector, and checks that the extent map
 //! points at the bytes actually written there. Runs on any platform, so the
-//! offset arithmetic — the part that silently corrupts a scan when it is wrong —
+//! offset arithmetic - the part that silently corrupts a scan when it is wrong -
 //! is covered on Linux and macOS CI where no real volume exists.
 
 use std::fs;
@@ -38,7 +38,7 @@ fn boot_sector_bytes() -> Vec<u8> {
     buf[0x28..0x30].copy_from_slice(&(IMAGE_CLUSTERS * u64::from(CLUSTER / SECTOR)).to_le_bytes());
     buf[0x30..0x38].copy_from_slice(&MFT_LCN.to_le_bytes());
     buf[0x38..0x40].copy_from_slice(&2u64.to_le_bytes());
-    buf[0x40] = 0xF6; // -10 → 1024-byte records
+    buf[0x40] = 0xF6; // -10 -> 1024-byte records
     buf[0x48..0x50].copy_from_slice(&0xDEAD_BEEF_CAFE_F00Du64.to_le_bytes());
     buf[510] = 0x55;
     buf[511] = 0xAA;
@@ -58,9 +58,9 @@ fn record_tag(record_number: u64) -> Vec<u8> {
 /// boundary arithmetic is exercised rather than assumed.
 fn fragments() -> Vec<(u64, u64)> {
     vec![
-        (MFT_LCN, 2), // VCN 0..2   → records 0..8
-        (20, 3),      // VCN 2..5   → records 8..20
-        (40, 1),      // VCN 5..6   → records 20..24
+        (MFT_LCN, 2), // VCN 0..2   -> records 0..8
+        (20, 3),      // VCN 2..5   -> records 8..20
+        (40, 1),      // VCN 5..6   -> records 20..24
     ]
 }
 
@@ -101,7 +101,7 @@ fn image(tag: &str) -> (PathBuf, MftExtents) {
     }
 
     // Prefix with junk so offset 0 of the partition is not offset 0 of the
-    // file — a source that ignores its base offset then reads the junk.
+    // file - a source that ignores its base offset then reads the junk.
     let mut file = vec![0xEEu8; PARTITION_OFFSET as usize];
     file.extend_from_slice(&volume);
     fs::write(&path, &file).expect("write image");
@@ -143,7 +143,7 @@ fn reads_and_parses_the_boot_sector_through_a_partition() {
 #[test]
 fn the_bootstrap_map_finds_record_zero() {
     // Before the real extent map is known, all we have is the boot sector's
-    // mft_start_lcn — which is enough to read the first fragment.
+    // mft_start_lcn - which is enough to read the first fragment.
     let (path, _) = image("bootstrap");
     let src = open(&path);
 
@@ -197,7 +197,7 @@ fn every_record_in_a_fragmented_mft_is_where_the_map_says() {
 fn a_batch_clamped_to_the_run_length_reads_only_real_records() {
     // What the bulk reader will do: ask for a location, read
     // `contiguous_records` worth in one I/O, and trust every record in it.
-    // v1 ignored the run length and read `count × 1024` straight through,
+    // v1 ignored the run length and read `count x 1024` straight through,
     // which past a fragment boundary is unrelated disk content.
     let (path, map) = image("batched");
     let src = open(&path);
@@ -230,7 +230,7 @@ fn a_batch_clamped_to_the_run_length_reads_only_real_records() {
 
     assert_eq!(
         batches, 3,
-        "one batch per fragment — the clamp split the read exactly at the boundaries"
+        "one batch per fragment - the clamp split the read exactly at the boundaries"
     );
 }
 

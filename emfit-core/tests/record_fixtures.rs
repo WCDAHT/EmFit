@@ -1,7 +1,7 @@
-//! Parser tests against fixture MFT records on disk (STANDARDS §5.1,
+//! Parser tests against fixture MFT records on disk (STANDARDS sec 5.1,
 //! roadmap M1 exit criteria).
 //!
-//! The `.bin` files under `tests/fixtures/` are byte-for-byte MFT records —
+//! The `.bin` files under `tests/fixtures/` are byte-for-byte MFT records -
 //! valid headers, update-sequence arrays applied, real attribute chains. Each
 //! test reads the committed file and runs the production parser over it, so a
 //! parser regression fails against stable bytes rather than against a builder
@@ -197,7 +197,7 @@ fn four_kn_record_needs_the_wide_stride() {
             .build(GEOMETRY_4KN)
     });
 
-    // The right stride repairs it…
+    // The right stride repairs it...
     let mut repaired = bytes.clone();
     let record = Record::parse(&mut repaired, 4096).expect("parses at 4096");
     let fname = record
@@ -208,7 +208,7 @@ fn four_kn_record_needs_the_wide_stride() {
         .unwrap();
     assert_eq!(fname.to_name(), "sector-native.txt");
 
-    // …and the legacy stride is rejected rather than silently mangling it.
+    // ...and the legacy stride is rejected rather than silently mangling it.
     let header = RecordHeader::parse(&bytes).unwrap();
     assert!(apply_fixup(&mut bytes, &header, 512).is_err());
 }

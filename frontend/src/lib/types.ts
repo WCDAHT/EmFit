@@ -1,5 +1,5 @@
 // Shared frontend types that mirror the shell's IPC shapes. Field names are
-// snake_case because the same serde shapes cross IPC unrenamed — keep these
+// snake_case because the same serde shapes cross IPC unrenamed - keep these
 // in step with the Rust `Serialize`/`Deserialize` derives in
 // src-tauri/src/dto.rs and core's `service::config`.
 
@@ -77,7 +77,7 @@ export type SortKey =
   | "extension"
   | "kind";
 
-/** One display row: pre-formatted strings plus ids (features.md §9). */
+/** One display row: pre-formatted strings plus ids (features.md sec 9). */
 export interface RowDto {
   vol: number;
   id: number;
@@ -97,7 +97,7 @@ export interface RowDto {
   is_alias: boolean;
   is_synthetic: boolean;
   is_reparse: boolean;
-  /** UTF-16 spans of `name` the query matched (merged, in order) — bolded. */
+  /** UTF-16 spans of `name` the query matched (merged, in order) - bolded. */
   match_ranges: [number, number][];
 }
 
@@ -128,7 +128,7 @@ export interface SelectionSummaryDto {
   allocated_display: string;
 }
 
-/** Payload of the `usn:deleted` event: nodes newly observed deleted (M5 —
+/** Payload of the `usn:deleted` event: nodes newly observed deleted (M5 -
  *  marks only; every view shows them flagged until the next rescan). */
 export interface UsnDeletedEvent {
   vol: number;
@@ -142,7 +142,7 @@ export interface UsnGapEvent {
 }
 
 /** Payload of the `menu:zoom` event: "Zoom in" was picked on a folder in
- *  the shell context menu — drill the treemap into it. */
+ *  the shell context menu - drill the treemap into it. */
 export interface MenuZoomEvent {
   vol: number;
   id: number;
@@ -178,7 +178,7 @@ export interface TreeRowDto {
   dirs: number;
   /** files + dirs for a directory; 0 for a file (renders blank). */
   items: number;
-  /** Raw mtime, ns since the Unix epoch (0 = unknown) — the sort key. */
+  /** Raw mtime, ns since the Unix epoch (0 = unknown) - the sort key. */
   modified: number;
   modified_display: string;
   /** Attribute letters: H hidden, S system, R reparse, C compressed,

@@ -2,7 +2,7 @@
 //!
 //! One thread per eligible volume polls the change journal on a ~1 s
 //! cadence and emits `usn:deleted` events carrying the affected node ids.
-//! Marks live entirely in the *frontend* session — nothing here or in the
+//! Marks live entirely in the *frontend* session - nothing here or in the
 //! index mutates: a deletion is a red border until the next rescan, by
 //! design. That is also why every watcher dies when a scan starts and the
 //! whole fleet respawns when it finishes: rescans change volume slots, so
@@ -37,7 +37,7 @@ const POLL_EVERY: Duration = Duration::from_secs(1);
 /// in the top 16. Every comparison happens at 48 bits.
 const RECORD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 
-/// The record numbers of every directory under the volume's Recycle Bin —
+/// The record numbers of every directory under the volume's Recycle Bin -
 /// a rename whose new parent is one of these IS a deletion, user-wise.
 /// (`RECYCLER` is the pre-Vista spelling.) Limitation: a SID subfolder
 /// created after the scan isn't in the index, so the first-ever recycle by
@@ -65,7 +65,7 @@ fn recycle_bin_dirs(index: &Index) -> HashSet<u64> {
     out
 }
 
-/// Cancel the running watcher fleet (called when a scan starts — the
+/// Cancel the running watcher fleet (called when a scan starts - the
 /// indexes those watchers map against are about to be replaced).
 pub fn stop_all(state: &AppState) {
     let mut inner = state.inner.lock().unwrap();
@@ -107,7 +107,7 @@ pub fn respawn_all(app: &AppHandle) {
     }
 }
 
-/// `"C:"` → `'C'`; disk-image keys (paths) don't qualify.
+/// `"C:"` -> `'C'`; disk-image keys (paths) don't qualify.
 fn volume_letter(key: &str) -> Option<char> {
     let mut chars = key.chars();
     let letter = chars.next()?;
@@ -139,12 +139,12 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
         }
     };
 
-    // FRN → node id, once. The index is immutable for this watcher's whole
+    // FRN -> node id, once. The index is immutable for this watcher's whole
     // life (a rescan cancels it before installing a new index).
     //
     // Keying detail that decides whether marking works AT ALL: the index's
-    // native ids are bare MFT record numbers — the builder masks to the low
-    // 48 bits (`builder.rs`) — while USN records carry the full file
+    // native ids are bare MFT record numbers - the builder masks to the low
+    // 48 bits (`builder.rs`) - while USN records carry the full file
     // reference number with the sequence counter in the top 16 bits. Both
     // sides must be compared at 48 bits.
     let by_native: HashMap<u64, u32> = index
@@ -152,7 +152,7 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
         .filter_map(|id| index.native_id(id).map(|native| (native & RECORD_MASK, id.get())))
         .collect();
 
-    // Plain Del is a RENAME into `$Recycle.Bin\<SID>\`, not a delete — the
+    // Plain Del is a RENAME into `$Recycle.Bin\<SID>\`, not a delete - the
     // record numbers of the bin's directories are what identify it.
     let recycle_dirs = recycle_bin_dirs(index);
 
@@ -205,15 +205,15 @@ fn watch_volume(app: &AppHandle, key: &str, index: &Index, cancel: &Cancellation
                     if ids.is_empty() && deletes + recycles > 0 {
                         tracing::warn!(
                             key,
-                            "usn: deletions/recycles observed but NONE matched the index — \
-                             the FRN↔native-id mapping is the suspect"
+                            "usn: deletions/recycles observed but NONE matched the index - \
+                             the FRN<->native-id mapping is the suspect"
                         );
                     }
                 }
                 if !ids.is_empty() && !cancel.is_cancelled() {
                     // The slot is resolved at emit time: other volumes'
                     // rescans can shift positions (and cancel this watcher
-                    // moments later — the frontend clears marks then).
+                    // moments later - the frontend clears marks then).
                     let state = app.state::<AppState>();
                     let vol = {
                         let inner = state.inner.lock().unwrap();

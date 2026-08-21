@@ -1,14 +1,14 @@
 <!--
-  About.svelte â€” about/licenses dialog.
+  About.svelte - about/licenses dialog.
 
   Unlike the Slint template (which embedded license text in the Rust binary
   via include_str! and pushed it through a bridge), the About panel is pure
   frontend now. The license files are imported as raw strings at build time
   with Vite's `?raw` suffix, so they ship inside the webview bundle and
   satisfy the "must contain this license" obligations (SIL OFL, MIT). No Rust
-  command is involved. See STANDARDS Â§5.6.
+  command is involved. See STANDARDS sec 5.6.
 
-  Tauri (MIT/Apache-2.0) imposes NO attribution requirement â€” there is no
+  Tauri (MIT/Apache-2.0) imposes NO attribution requirement - there is no
   "Made with Slint"-style badge to carry anymore. This panel exists for the
   bundled font and icon licenses plus the app's own proprietary notice.
 -->

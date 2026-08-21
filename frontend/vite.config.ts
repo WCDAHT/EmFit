@@ -8,7 +8,7 @@ const host = process.env.TAURI_DEV_HOST;
 // The root package.json scripts `cd frontend` before running vite/svelte-check,
 // so this dir is the Vite root: svelte.config.js, index.html, and src/ resolve
 // relative to it, and the build output lands in frontend/dist (referenced by
-// `frontendDist` in src-tauri/tauri.conf.json). See STANDARDS §1.
+// `frontendDist` in src-tauri/tauri.conf.json). See STANDARDS sec 1.
 export default defineConfig({
   plugins: [svelte()],
 
@@ -27,7 +27,7 @@ export default defineConfig({
       ? { protocol: "ws", host, port: 1421 }
       : undefined,
     fs: {
-      // Allow reading files above the frontend root — the About panel imports
+      // Allow reading files above the frontend root - the About panel imports
       // the repo-root LICENSE.txt via `?raw`. Vite would otherwise block it.
       allow: [".."],
     },

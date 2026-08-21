@@ -2,19 +2,19 @@
 //!
 //! NTFS keeps one record per file in a single table, and each record names its
 //! own parent. Sweeping that table start to finish yields the whole tree with
-//! no directory traversal at all — which is why a volume that takes minutes to
-//! walk takes seconds to read. `architecture.md` §1.
+//! no directory traversal at all - which is why a volume that takes minutes to
+//! walk takes seconds to read. `architecture.md` sec 1.
 //!
 //! # Layout
 //!
-//! - [`boot`] — volume geometry from the first 512 bytes
-//! - [`runs`] — decoding the `(length, offset)` lists NTFS stores extents in
-//! - [`extents`] — where the MFT is, and how much can be read at once
-//! - [`retrieval`] — asking the filesystem driver for the same map, faster
+//! - [`boot`] - volume geometry from the first 512 bytes
+//! - [`runs`] - decoding the `(length, offset)` lists NTFS stores extents in
+//! - [`extents`] - where the MFT is, and how much can be read at once
+//! - [`retrieval`] - asking the filesystem driver for the same map, faster
 //!
 //! # Finding the MFT
 //!
-//! Two routes to the same answer, and the fallback is not exotic — it is what
+//! Two routes to the same answer, and the fallback is not exotic - it is what
 //! runs on a disk image, on an unmounted volume, and whenever `$MFT` cannot be
 //! opened:
 //!

@@ -1,7 +1,7 @@
 //! The NTFS boot sector: the volume's geometry, in the first 512 bytes.
 //!
-//! Everything the scanner needs to find the MFT — cluster size, record size,
-//! and where the MFT starts — is here. Windows will also report most of it
+//! Everything the scanner needs to find the MFT - cluster size, record size,
+//! and where the MFT starts - is here. Windows will also report most of it
 //! through `FSCTL_GET_NTFS_VOLUME_DATA`, but that requires the filesystem
 //! driver to be mounted and cooperative. Reading the boot sector works on a
 //! raw image and on a volume the driver refuses to talk about, so it is the
@@ -26,7 +26,7 @@ pub struct BootSector {
     /// Allocation unit. Every file's on-disk size is a multiple of this.
     pub bytes_per_cluster: u32,
     /// Size of one MFT record. Effectively always 1024, but stated rather
-    /// than assumed — v1 hardcoded it in places.
+    /// than assumed - v1 hardcoded it in places.
     pub bytes_per_record: u32,
     /// First cluster of the MFT.
     pub mft_start_lcn: u64,
@@ -72,7 +72,7 @@ impl BootSector {
             return Err(Error::Parse {
                 format: "NTFS boot sector".to_string(),
                 message: format!(
-                    "cluster size overflows: {bytes_per_sector} × {sectors_per_cluster}"
+                    "cluster size overflows: {bytes_per_sector} x {sectors_per_cluster}"
                 ),
             });
         };
@@ -115,7 +115,7 @@ impl BootSector {
 
 /// Sectors per cluster, which NTFS encodes two ways.
 ///
-/// Values above 0x80 are a signed shift: `0xF4` (-12) means 2¹² sectors. Used
+/// Values above 0x80 are a signed shift: `0xF4` (-12) means 2^12 sectors. Used
 /// on volumes with clusters larger than 64 KB, which Windows 10 and later
 /// support up to 2 MB.
 fn decode_cluster_factor(raw: u8) -> u32 {
@@ -129,8 +129,8 @@ fn decode_cluster_factor(raw: u8) -> u32 {
 /// MFT record size, encoded the same two ways.
 ///
 /// Positive: a count of clusters. Negative (as `i8`): a power of two in bytes,
-/// so `0xF6` (-10) means 2¹⁰ = 1024 — which is what essentially every volume
-/// uses, because a 4 KB cluster would otherwise make records 4× larger than
+/// so `0xF6` (-10) means 2^10 = 1024 - which is what essentially every volume
+/// uses, because a 4 KB cluster would otherwise make records 4x larger than
 /// they need to be.
 fn decode_record_size(raw: u8, bytes_per_cluster: u32) -> Result<u32> {
     let size = if (raw as i8) < 0 {
@@ -182,12 +182,12 @@ mod tests {
         buf[0..3].copy_from_slice(&[0xEB, 0x52, 0x90]);
         buf[3..11].copy_from_slice(NTFS_OEM_ID);
         buf[0x0B..0x0D].copy_from_slice(&512u16.to_le_bytes());
-        buf[0x0D] = 8; // 8 × 512 = 4096-byte clusters
+        buf[0x0D] = 8; // 8 x 512 = 4096-byte clusters
         buf[0x15] = 0xF8;
         buf[0x28..0x30].copy_from_slice(&976_773_167u64.to_le_bytes());
         buf[0x30..0x38].copy_from_slice(&786_432u64.to_le_bytes());
         buf[0x38..0x40].copy_from_slice(&2u64.to_le_bytes());
-        buf[0x40] = 0xF6; // -10 → 2^10 = 1024-byte records
+        buf[0x40] = 0xF6; // -10 -> 2^10 = 1024-byte records
         buf[0x48..0x50].copy_from_slice(&0x1234_5678_9ABC_DEF0u64.to_le_bytes());
         buf[510] = 0x55;
         buf[511] = 0xAA;
@@ -274,7 +274,7 @@ mod tests {
         assert!(BootSector::parse(&zero_cluster).is_err());
 
         let mut huge_record = typical();
-        huge_record[0x40] = 0xE0; // -32 → 2^32, nonsense
+        huge_record[0x40] = 0xE0; // -32 -> 2^32, nonsense
         assert!(BootSector::parse(&huge_record).is_err());
     }
 

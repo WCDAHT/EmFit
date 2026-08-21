@@ -1,4 +1,4 @@
-/* Brunch design tokens. See STANDARDS §2.
+/* Brunch design tokens. See STANDARDS sec 2.
  *
  * Single source of truth for color, spacing, and typography across the app
  * and every app spawned from this template. The token names and semantic
@@ -7,7 +7,7 @@
  *
  * This file is the CSS-custom-property successor to the old theme.slint
  * global. The token names are intentionally preserved 1:1 (just kebab-cased
- * and prefixed `--`) so the design contract survives the Slint→Tauri move.
+ * and prefixed `--`) so the design contract survives the Slint->Tauri move.
  *
  * Two palettes ship: dark (default; the `:root` values below) and light
  * (paper-white, tuned for projector legibility in court/lab use; the
@@ -91,7 +91,7 @@
   --search-bg: #3d3d00;
 
   /* ---------------------------------------------------------------
-   * TYPOGRAPHY. See §2.4. Inter is bundled via @font-face in global.css.
+   * TYPOGRAPHY. See sec 2.4. Inter is bundled via @font-face in global.css.
    * --------------------------------------------------------------- */
   --font-family: "Inter", system-ui, sans-serif;
   --font-family-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
@@ -129,10 +129,10 @@
   --row-height: 36px;
 
   /* ---------------------------------------------------------------
-   * MOTION (durations + easing; §2.7). Used by CSS transitions; the matching
+   * MOTION (durations + easing; sec 2.7). Used by CSS transitions; the matching
    * numeric values for Svelte JS transitions live in lib/motion.ts and must
    * stay in lockstep with these (the CSS/JS boundary can't share a var()).
-   * Keep motion subtle and fast — chrome should feel responsive, not
+   * Keep motion subtle and fast - chrome should feel responsive, not
    * animated. All motion is gated on prefers-reduced-motion at call sites.
    * --------------------------------------------------------------- */
   --duration-fast: 140ms; /* hover / state changes */
@@ -145,7 +145,7 @@
   --stagger-step: 40ms; /* per-item delay in list cascades */
 
   /* ---------------------------------------------------------------
-   * CATEGORY PALETTE (tags, card colors, chart series; §2.3). Eight tokens
+   * CATEGORY PALETTE (tags, card colors, chart series; sec 2.3). Eight tokens
    * ordered so adjacent categories are maximally distinguishable; cat-8 is
    * the brand orange so it only appears in 6+ series charts.
    * --------------------------------------------------------------- */

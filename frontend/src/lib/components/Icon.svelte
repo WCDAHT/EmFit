@@ -1,5 +1,5 @@
 <!--
-  Icon.svelte — thin wrapper over the Bootstrap Icons webfont (STANDARDS §2.5).
+  Icon.svelte - thin wrapper over the Bootstrap Icons webfont (STANDARDS sec 2.5).
 
   Usage:  <Icon name="folder2-open" />
           <Icon name="trash" size={20} color="var(--danger)" />

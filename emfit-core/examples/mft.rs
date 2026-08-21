@@ -168,7 +168,7 @@ fn report(letter: char, out: &mut String) -> Result<(), Box<dyn std::error::Erro
                         "YES".to_string()
                     } else {
                         format!(
-                            "NO — record 0 gave {} fragments / {} clusters, \
+                            "NO - record 0 gave {} fragments / {} clusters, \
                              the driver gave {} / {}",
                             from_record.fragment_count(),
                             from_record.total_clusters(),
@@ -432,7 +432,7 @@ fn size_breakdown(
     let mut resident = Bucket::default();
     let mut ordinary = Bucket::default();
 
-    // Files whose logical size most exceeds what they occupy — the individual
+    // Files whose logical size most exceeds what they occupy - the individual
     // culprits, if there are a few big ones rather than many small ones.
     let mut inflated: Vec<(u64, emfit_core::model::index::NodeId)> = Vec::new();
 
@@ -564,7 +564,7 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 #[cfg(windows)]
-/// Parse record 0 and report what it says — the first real exercise of the
+/// Parse record 0 and report what it says - the first real exercise of the
 /// fixup and attribute walk against live data.
 fn dump_record_zero(
     src: &FileBlockSource,

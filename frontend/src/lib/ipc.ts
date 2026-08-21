@@ -1,4 +1,4 @@
-//! Typed wrappers around Tauri's `invoke()`. See STANDARDS §3.4.
+//! Typed wrappers around Tauri's `invoke()`. See STANDARDS sec 3.4.
 //!
 //! The rest of the Svelte code calls these functions, never `invoke("...")`
 //! with a raw string. Each function pairs with a `#[tauri::command]` in
@@ -78,8 +78,8 @@ export function setSort(key: SortKey, ascending: boolean): Promise<void> {
   return invoke("set_sort", { sort: { key, ascending } });
 }
 
-/** One window of the current view — the only way rows reach the webview
- *  (features.md §9: the index never crosses IPC). */
+/** One window of the current view - the only way rows reach the webview
+ *  (features.md sec 9: the index never crosses IPC). */
 export function getRows(offset: number, count: number): Promise<RowWindowDto> {
   return invoke("get_rows", { offset, count });
 }
@@ -134,7 +134,7 @@ export function nodeInfo(vol: number, id: number): Promise<NodeInfoDto | null> {
   return invoke("node_info", { vol, id });
 }
 
-/** Native shell context menu for a node, at the cursor (fire-and-forget —
+/** Native shell context menu for a node, at the cursor (fire-and-forget -
  *  the menu is hosted on a dedicated OS thread). */
 export function showContextMenu(vol: number, id: number): Promise<void> {
   return invoke("show_context_menu", { vol, id });

@@ -2,7 +2,7 @@
 //!
 //! A record's contents are a chain of typed, self-describing chunks. Each
 //! carries its own length, so walking them is a matter of adding lengths until
-//! the end marker — which is also why one bad length turns the rest of the
+//! the end marker - which is also why one bad length turns the rest of the
 //! record into nonsense, and why the iterator here refuses to move backwards
 //! or off the end.
 //!
@@ -10,8 +10,8 @@
 //!
 //! A small attribute stores its value inline. A large one stores a **data run
 //! list** instead, mapping virtual clusters to positions on the volume. A
-//! 200-byte text file therefore occupies no clusters at all — its bytes live
-//! in the MFT record — which is why "size on disk" for such a file is zero
+//! 200-byte text file therefore occupies no clusters at all - its bytes live
+//! in the MFT record - which is why "size on disk" for such a file is zero
 //! rather than one cluster.
 
 use crate::parser::ntfs::runs;
@@ -29,7 +29,7 @@ pub enum AttributeType {
     FileName,
     /// The file's contents, or a map of where they are.
     Data,
-    /// Anything else — security descriptors, index roots, reparse data.
+    /// Anything else - security descriptors, index roots, reparse data.
     Other(u32),
     /// The terminator.
     End,
@@ -48,7 +48,7 @@ impl AttributeType {
     }
 }
 
-/// Smallest possible attribute header — type, length, and the resident flag.
+/// Smallest possible attribute header - type, length, and the resident flag.
 const MIN_HEADER: usize = 16;
 /// Resident attributes add a value length and offset.
 const RESIDENT_HEADER: usize = 24;
@@ -70,7 +70,7 @@ impl<'a> Attribute<'a> {
         AttributeType::from_code(self.type_code())
     }
 
-    /// Total length including the header — what the iterator advances by.
+    /// Total length including the header - what the iterator advances by.
     pub fn len(&self) -> usize {
         read_u32(self.data, 0x04) as usize
     }
@@ -95,7 +95,7 @@ impl<'a> Attribute<'a> {
         self.name_len() == 0
     }
 
-    /// Attribute-level flags — compression, encryption, sparseness.
+    /// Attribute-level flags - compression, encryption, sparseness.
     ///
     /// More reliable than the DOS attribute bits in `$STANDARD_INFORMATION`,
     /// which describe the *file* while these describe *this stream*.
@@ -179,7 +179,7 @@ impl<'a> NonResident<'a> {
     ///
     /// Despite the name this is not always what the file occupies. For a
     /// compressed or sparse stream it is the size the data *would* take if it
-    /// were laid out plainly — holes and compressed runs included. The figure
+    /// were laid out plainly - holes and compressed runs included. The figure
     /// a user means by "size on disk" is [`Self::physical_size`].
     pub fn allocated_size(&self) -> u64 {
         read_u64(self.data, 0x28)
@@ -194,8 +194,8 @@ impl<'a> NonResident<'a> {
 
     /// Bytes genuinely occupied, for a compressed or sparse stream.
     ///
-    /// This field only exists when [`Self::compression_unit`] is non-zero —
-    /// the header is 64 bytes without it and 72 with it — so reading it
+    /// This field only exists when [`Self::compression_unit`] is non-zero -
+    /// the header is 64 bytes without it and 72 with it - so reading it
     /// unconditionally would pick up whatever follows.
     pub fn compressed_size(&self) -> Option<u64> {
         (self.compression_unit() != 0 && self.data.len() >= 0x48).then(|| read_u64(self.data, 0x40))
@@ -232,7 +232,7 @@ impl<'a> NonResident<'a> {
         runs::decode(&self.data[offset..]).0
     }
 
-    /// Sum this fragment's run list without decoding it into a `Vec` —
+    /// Sum this fragment's run list without decoding it into a `Vec` -
     /// cheap enough for the sweep to call on every non-resident stream.
     pub fn run_summary(&self) -> runs::RunSummary {
         let offset = read_u16(self.data, 0x20) as usize;
@@ -242,12 +242,12 @@ impl<'a> NonResident<'a> {
         runs::summarize(&self.data[offset..])
     }
 
-    /// Bytes genuinely backed by clusters, summed from the run list —
+    /// Bytes genuinely backed by clusters, summed from the run list -
     /// sparse runs contribute nothing.
     ///
     /// The header's [`Self::allocated_size`] can report the full *reserved*
     /// span when the stream has holes; `$BadClus:$Bad` is the canonical
-    /// case, "allocating" the entire volume while owning zero clusters —
+    /// case, "allocating" the entire volume while owning zero clusters -
     /// and on real volumes it does this **without** the sparse attribute
     /// flag, so holes must be detected in the runs, not the flags. Covers
     /// only this record's fragment; a holed stream fragmented across
@@ -326,7 +326,7 @@ pub struct StandardInfo {
     /// Last access. Often stale: Windows disables access-time updates by
     /// default, so this can be years behind.
     pub accessed: i64,
-    /// DOS attribute bits — hidden, system, compressed, and so on.
+    /// DOS attribute bits - hidden, system, compressed, and so on.
     pub attributes: u32,
 }
 
@@ -364,7 +364,7 @@ pub enum Namespace {
     Posix,
     /// The ordinary long name.
     Win32,
-    /// The 8.3 alias — `PROGRA~1`. An alternative spelling of a name the file
+    /// The 8.3 alias - `PROGRA~1`. An alternative spelling of a name the file
     /// already has, so counting it as a separate link double-counts the file.
     Dos,
     /// A name short enough to serve as both.
@@ -523,9 +523,9 @@ const FILETIME_EPOCH_OFFSET: i64 = 116_444_736_000_000_000;
 ///
 /// NTFS counts 100-nanosecond ticks from 1601; the index stores nanoseconds
 /// from 1970. Converting here rather than in the UI is the rule that keeps a
-/// second filesystem from leaking its own epoch upward (`architecture.md` §7).
+/// second filesystem from leaking its own epoch upward (`architecture.md` sec 7).
 ///
-/// Zero in, zero out — NTFS uses it for "unknown", and shifting it by 369 years
+/// Zero in, zero out - NTFS uses it for "unknown", and shifting it by 369 years
 /// would put unknown timestamps in 1601 rather than leaving them blank.
 pub fn filetime_to_unix_nanos(filetime: u64) -> i64 {
     if filetime == 0 {
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn a_truncated_compressed_header_falls_back_rather_than_reading_past_it() {
         // compression_unit says the field is there, but the attribute is too
-        // short to hold it — reading anyway would pick up the run list.
+        // short to hold it - reading anyway would pick up the run list.
         let mut buf = non_resident(0x80, 1000, 4096, &[0x00]);
         buf[0x22..0x24].copy_from_slice(&4u16.to_le_bytes());
         buf.truncate(0x44);
@@ -864,7 +864,12 @@ mod tests {
 
     #[test]
     fn names_decode_beyond_ascii() {
-        for name in ["日本語のファイル.txt", "café.txt", "emoji-🦀.rs"] {
+        // A Japanese name, an accented one, and one outside the BMP.
+        for name in [
+            "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{30d5}\u{30a1}\u{30a4}\u{30eb}.txt",
+            "caf\u{e9}.txt",
+            "emoji-\u{1f980}.rs",
+        ] {
             let value = file_name_value(5, 1, name);
             assert_eq!(FileName::parse(&value).unwrap().to_name(), name);
         }

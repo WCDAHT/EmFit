@@ -1,9 +1,9 @@
 //! Shell-owned application state: scanned volumes and the current view.
 //!
-//! The Rust side owns truth (STANDARDS §3.3). The webview holds no second
-//! copy of anything here — it asks for row windows against the current
+//! The Rust side owns truth (STANDARDS sec 3.3). The webview holds no second
+//! copy of anything here - it asks for row windows against the current
 //! query/sort and renders what it gets. The index itself never crosses IPC
-//! (features.md §9); it lives in this struct behind an `Arc`, shared with the
+//! (features.md sec 9); it lives in this struct behind an `Arc`, shared with the
 //! search worker threads.
 
 use std::collections::HashMap;
@@ -32,8 +32,8 @@ pub struct ViewState {
     /// `Arc` so `get_rows` can slice while a new search builds its own list.
     pub hits: Arc<Vec<Hit>>,
     /// Bumped on every query/sort/volume change; a worker only installs its
-    /// result if the generation still matches (stale results are dropped —
-    /// the "interruptible query" of features.md §2).
+    /// result if the generation still matches (stale results are dropped -
+    /// the "interruptible query" of features.md sec 2).
     pub generation: u64,
     pub search_cancel: Option<CancellationToken>,
 }

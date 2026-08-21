@@ -1,12 +1,12 @@
 //! The scanned volume, flat.
 //!
 //! One `Vec<Node>` addressed by [`NodeId`], one string arena holding every
-//! name, one CSR array holding every parent→child edge. No per-node
+//! name, one CSR array holding every parent->child edge. No per-node
 //! allocations, no hash maps, no pointers. Search, sort, and rollup are linear
 //! scans over contiguous memory, which is where the speed comes from.
 //!
 //! Built exclusively by [`IndexBuilder`]; immutable afterward. See
-//! `architecture.md` §7.
+//! `architecture.md` sec 7.
 //!
 //! [`IndexBuilder`]: crate::model::builder::IndexBuilder
 
@@ -15,7 +15,7 @@ use crate::model::entry::{EntryFlags, Times};
 
 /// A position in [`Index::nodes`].
 ///
-/// Assigned by the builder in arrival order — deliberately **not** the
+/// Assigned by the builder in arrival order - deliberately **not** the
 /// filesystem's own number. The MFT record number or inode lives in a side
 /// table ([`Index::native_id`]), because FAT32 has no such number at all, ZFS
 /// object ids are sparse 64-bit values that would make a `Vec` index
@@ -23,7 +23,7 @@ use crate::model::entry::{EntryFlags, Times};
 /// ambiguous.
 ///
 /// The newtype is not ceremony: [`Node`] holds two different kinds of `u32`
-/// index — `parent` into `nodes`, `first_child` into `children` — and mixing
+/// index - `parent` into `nodes`, `first_child` into `children` - and mixing
 /// them compiles fine while producing garbage.
 /// `Default` is node zero. Meaningful only inside the builder, where every
 /// defaulted [`Node`] has its parent overwritten before the index is handed
@@ -65,7 +65,7 @@ impl NodeId {
 ///
 /// Size matters more than it looks. At five million files every extra eight
 /// bytes is forty megabytes and, worse, a cache miss on every pass of search,
-/// sort, and rollup. Before widening this struct, read `architecture.md` §7.
+/// sort, and rollup. Before widening this struct, read `architecture.md` sec 7.
 #[derive(Debug, Clone, Default)]
 pub struct Node {
     /// Containing directory. The root is its own parent, which is how upward
@@ -133,7 +133,7 @@ impl Node {
         self.flags().is_alias()
     }
 
-    /// Logical size. Zero for directories — use [`Node::total_size`] for the
+    /// Logical size. Zero for directories - use [`Node::total_size`] for the
     /// number a user expects to see next to a folder.
     #[inline]
     pub fn size(&self) -> u64 {
@@ -192,7 +192,7 @@ pub struct Index {
     nodes: Vec<Node>,
     /// Every name, concatenated. Nodes hold `(offset, length)` into it.
     arena: String,
-    /// Every parent→child edge, grouped by parent (CSR). A node's children are
+    /// Every parent->child edge, grouped by parent (CSR). A node's children are
     /// `children[first_child .. first_child + child_count]`.
     children: Vec<NodeId>,
     /// Filesystem-native ids, parallel to `nodes`. Empty when the volume has
@@ -207,7 +207,7 @@ pub struct Index {
 impl Index {
     /// Assemble from a completed build.
     ///
-    /// Not public API — [`IndexBuilder::finish`] is the only caller, and it is
+    /// Not public API - [`IndexBuilder::finish`] is the only caller, and it is
     /// what guarantees the invariants this type relies on: arena offsets in
     /// range, CSR runs disjoint and covering, every node reachable from
     /// `root`.
@@ -260,7 +260,7 @@ impl Index {
         self.nodes.len()
     }
 
-    /// Always false in practice — a built index has at least a root.
+    /// Always false in practice - a built index has at least a root.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
@@ -287,7 +287,7 @@ impl Index {
         (0..self.nodes.len() as u32).map(NodeId::new)
     }
 
-    /// This node's name — the file name alone, not a path.
+    /// This node's name - the file name alone, not a path.
     #[inline]
     pub fn name(&self, id: NodeId) -> &str {
         let node = self.node(id);
@@ -303,7 +303,7 @@ impl Index {
         &self.children[start..start + node.child_count as usize]
     }
 
-    /// The filesystem's own identifier — MFT record number, inode number.
+    /// The filesystem's own identifier - MFT record number, inode number.
     ///
     /// `None` when the volume has no stable ids ([`VolumeCaps::has_stable_ids`])
     /// or the node is synthetic.
@@ -333,7 +333,7 @@ impl Index {
     }
 
     /// Full display path, assembled from [`VolumeCaps::root_label`] and
-    /// [`VolumeCaps::path_separator`] — never a hardcoded drive letter or
+    /// [`VolumeCaps::path_separator`] - never a hardcoded drive letter or
     /// backslash, so the same code serves `C:\Users\file.txt` and
     /// `/home/user/file.txt`.
     ///
@@ -366,7 +366,7 @@ impl Index {
 }
 
 impl std::fmt::Debug for Index {
-    /// Shape only — an index holds millions of nodes and a multi-megabyte
+    /// Shape only - an index holds millions of nodes and a multi-megabyte
     /// arena, and no debug dump should ever try to print them.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Index")

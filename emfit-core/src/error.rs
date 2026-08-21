@@ -1,4 +1,4 @@
-//! Crate-level error type. See STANDARDS §4.1.
+//! Crate-level error type. See STANDARDS sec 4.1.
 
 use std::path::PathBuf;
 
@@ -48,7 +48,7 @@ pub enum Error {
     /// rather than as the OS's opaque "invalid parameter".
     #[error(
         "misaligned unbuffered read on {device}: offset {offset}, length {len}, \
-         buffer address off by {buffer_align} — all must be multiples of the \
+         buffer address off by {buffer_align} - all must be multiples of the \
          {sector_size}-byte sector"
     )]
     Misaligned {
@@ -72,7 +72,7 @@ pub enum Error {
     #[error("config serialize error: {0}")]
     TomlSer(#[from] toml::ser::Error),
 
-    /// A configuration problem that isn't a (de)serialisation failure — most
+    /// A configuration problem that isn't a (de)serialisation failure - most
     /// often the OS config/data directory could not be resolved.
     #[error("config error: {message}")]
     Config { message: String },
@@ -89,7 +89,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// The operation exists only on some platforms — raw volume access and
+    /// The operation exists only on some platforms - raw volume access and
     /// elevation are Windows-only. Returned rather than `cfg`-gating the
     /// function away, so callers need no conditional compilation.
     #[error("{operation} is not supported on this platform")]

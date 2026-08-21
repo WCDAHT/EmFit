@@ -1,11 +1,11 @@
 <!--
-  App.svelte — root view. No in-app header: chrome lives in the native window
+  App.svelte - root view. No in-app header: chrome lives in the native window
   menu (built in src-tauri/src/lib.rs), so every pixel below the menu bar
   belongs to the data. Two tabs: List (search) and Tree view (the M3
   space-analysis pane, placeholder until then).
 
-  All keyboard shortcuts dispatch from here (STANDARDS §3.7), and all Tauri
-  events — scan progress, view updates, native menu clicks — are subscribed
+  All keyboard shortcuts dispatch from here (STANDARDS sec 3.7), and all Tauri
+  events - scan progress, view updates, native menu clicks - are subscribed
   here once and projected into the shared session state.
 -->
 <script lang="ts">
@@ -93,7 +93,7 @@
       // are frontend-session state only, sticky until the next rescan.
       listen<UsnDeletedEvent>("usn:deleted", ({ payload }) => {
         // console.log(
-        //   `usn:deleted received — vol ${payload.vol}, ${payload.ids.length} node(s):`,
+        //   `usn:deleted received - vol ${payload.vol}, ${payload.ids.length} node(s):`,
         //   payload.ids.slice(0, 10),
         // );
         for (const id of payload.ids) {
@@ -103,7 +103,7 @@
       }),
 
       // "Zoom in" from the shell context menu: drill the treemap into the
-      // folder — switching to the Tree view if the menu came from the list.
+      // folder - switching to the Tree view if the menu came from the list.
       listen<MenuZoomEvent>("menu:zoom", ({ payload }) => {
         session.tab = "tree";
         session.drill = { vol: payload.vol, id: payload.id };
@@ -112,7 +112,7 @@
       listen<UsnGapEvent>("usn:gap", ({ payload }) => {
         session.warnings = [
           ...session.warnings,
-          `Change journal gap on ${payload.volume} — deletion marks are incomplete; rescan to refresh.`,
+          `Change journal gap on ${payload.volume} - deletion marks are incomplete; rescan to refresh.`,
         ];
       }),
 
@@ -178,7 +178,7 @@
     return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   }
 
-  // All app shortcuts, dispatched at the root (STANDARDS §3.7). Open dialogs
+  // All app shortcuts, dispatched at the root (STANDARDS sec 3.7). Open dialogs
   // own their own Esc; global handling is suppressed while one is up.
   function onKeydown(e: KeyboardEvent) {
     const dialogOpen = aboutOpen || shortcutsOpen || settingsOpen;

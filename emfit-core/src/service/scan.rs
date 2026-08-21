@@ -1,12 +1,12 @@
 //! Scan orchestration: from a discovered volume to a finished [`Index`].
 //!
-//! The layers below this one are deliberately ignorant of each other — a
+//! The layers below this one are deliberately ignorant of each other - a
 //! [`BlockSource`] does not know what NTFS is, the sweep does not know where
 //! its bytes come from, the builder does not know a disk exists. This module
 //! is where they are wired together for one scan:
 //!
 //! 1. open the volume (physical-drive mode by default, volume-handle mode as
-//!    fallback — features.md §1.1),
+//!    fallback - features.md sec 1.1),
 //! 2. recover the MFT layout (driver retrieval pointers when the volume is
 //!    mounted, record 0 otherwise),
 //! 3. sweep into an [`IndexBuilder`],
@@ -15,7 +15,7 @@
 //!
 //! [`scan_volumes`] runs several volumes in parallel with per-volume failure
 //! isolation: one drive refusing access reports an error for that drive and
-//! nothing else (features.md §7).
+//! nothing else (features.md sec 7).
 
 use std::time::Instant;
 
@@ -36,7 +36,7 @@ use crate::service::benchlog;
 use crate::service::fold::CaseFold;
 use crate::service::task::{CancellationToken, Progress};
 
-/// The synthetic id the free-space row is pushed under. All ones — no real
+/// The synthetic id the free-space row is pushed under. All ones - no real
 /// MFT record can collide (record numbers are 48-bit) and no hard-link alias
 /// can either (aliases reuse a real record's low 48 bits, and this value's
 /// low 48 bits are no mintable record number).
@@ -81,7 +81,7 @@ pub struct VolumeScanOptions {
     pub mode: ScanMode,
     pub sweep: ScanOptions,
     /// Skip the synthetic free-space row. On by default because the treemap
-    /// and totals should account for the whole volume (features.md §1.3).
+    /// and totals should account for the whole volume (features.md sec 1.3).
     pub skip_free_space: bool,
 }
 
@@ -92,14 +92,14 @@ pub struct VolumeScanOutcome {
     /// Recoverable problems, in the order they surfaced.
     pub warnings: Vec<ScanWarning>,
     pub stats: ScanStats,
-    /// Alternate data streams, keyed by owning MFT record (a native id — map
+    /// Alternate data streams, keyed by owning MFT record (a native id - map
     /// through [`Index::native_id`] when a node is in hand).
     pub ads: Vec<AdsStream>,
     /// How the bytes were actually read.
     pub mode: AccessMode,
-    /// The volume's case-folding rule, from `$UpCase` when it was readable —
+    /// The volume's case-folding rule, from `$UpCase` when it was readable -
     /// search compares names with this, not with a global rule
-    /// (features.md §2).
+    /// (features.md sec 2).
     pub fold: CaseFold,
 }
 
@@ -144,7 +144,7 @@ fn scan_volume_inner(
     let (source, mode) = open_volume_source(volume, options.mode)?;
     let mut layout = bootstrap::probe(&source)?;
 
-    // The driver's map is authoritative for a mounted volume — one ioctl and
+    // The driver's map is authoritative for a mounted volume - one ioctl and
     // it reflects whatever the filesystem believes right now. Taken only when
     // it covers everything record 0 claims exists; otherwise the record 0 map
     // (already validated) stands.
@@ -229,9 +229,9 @@ pub fn scan_image(
 /// Parallelism follows the **physical disks**, not the volume list: volumes
 /// on different disks scan concurrently, volumes sharing a disk scan one
 /// after another. Two partitions of one SSD scanned at once halve each
-/// other's sequential bandwidth and both finish late — "C: and D: at once
+/// other's sequential bandwidth and both finish late - "C: and D: at once
 /// is nearly free" holds only when they are separate spindles/SSDs
-/// (features.md §1.2).
+/// (features.md sec 1.2).
 ///
 /// Failure is isolated per volume: the result slot for a drive that refused
 /// access carries its error, and every other drive completes normally.
@@ -293,7 +293,7 @@ pub fn scan_volumes(
 /// Partition volume indices into scan lanes, one per physical disk.
 ///
 /// A volume whose disk is unknown (spanned, or no partition location) gets
-/// its own lane — the safe default, since nothing proves it shares media.
+/// its own lane - the safe default, since nothing proves it shares media.
 fn group_by_disk(volumes: &[VolumeInfo]) -> Vec<Vec<usize>> {
     let mut lanes: Vec<(Option<u32>, Vec<usize>)> = Vec::new();
     for (i, volume) in volumes.iter().enumerate() {
@@ -412,7 +412,7 @@ fn run_scan(
         }
     };
 
-    // Free space as a first-class row (features.md §1.3): without it the
+    // Free space as a first-class row (features.md sec 1.3): without it the
     // treemap under-accounts the volume and "used plus free" never adds up.
     // Synthetic, so exports and the UI can disclose it is not a real file.
     if let Some(free) = free_bytes {
@@ -443,7 +443,7 @@ fn run_scan(
 }
 
 /// MFT record 10 is `$UpCase`: 128 KiB mapping every UTF-16 code unit to its
-/// uppercase form — the table the filesystem itself compares names with.
+/// uppercase form - the table the filesystem itself compares names with.
 const UPCASE_RECORD: u64 = 10;
 
 /// Read `$UpCase` off the volume. `None` on any problem: folding then falls
@@ -493,7 +493,7 @@ fn read_upcase(source: &dyn BlockSource, layout: &MftLayout) -> Option<Vec<u16>>
     None
 }
 
-/// Record the scan in the BenchLog (STANDARDS §5.5). Best-effort: a failure
+/// Record the scan in the BenchLog (STANDARDS sec 5.5). Best-effort: a failure
 /// to write telemetry must never fail a scan.
 fn log_bench(label: &str, started: Instant, result: &Result<VolumeScanOutcome>) {
     let elapsed = started.elapsed();
@@ -557,7 +557,7 @@ mod tests {
 
         let lanes = group_by_disk(&volumes);
         assert_eq!(lanes.len(), 3, "disk 0, disk 1, and the unknown");
-        assert_eq!(lanes[0], vec![0, 2], "same disk → sequential lane");
+        assert_eq!(lanes[0], vec![0, 2], "same disk -> sequential lane");
         assert_eq!(lanes[1], vec![1]);
         assert_eq!(lanes[2], vec![3]);
     }

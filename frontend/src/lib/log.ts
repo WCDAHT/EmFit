@@ -1,9 +1,9 @@
-// Frontend → backend log bridge.
+// Frontend -> backend log bridge.
 //
 // The webview has no log file of its own, so every `console.*` call is mirrored
 // into the Rust `tracing` pipeline (via the `log_event` command), giving one
-// unified, greppable log file where a full chain of actions — frontend intents
-// and backend mutations alike — can be traced. The original console output is
+// unified, greppable log file where a full chain of actions - frontend intents
+// and backend mutations alike - can be traced. The original console output is
 // kept so devtools still works during `tauri dev`.
 //
 // Install once at startup (main.ts). Idempotent. Best-effort: a failed forward
@@ -13,7 +13,7 @@ import { logEvent } from "./ipc";
 
 type Level = "trace" | "debug" | "info" | "warn" | "error";
 
-// JS console method → tracing level. `log` and `info` both map to info.
+// JS console method -> tracing level. `log` and `info` both map to info.
 const CONSOLE_LEVELS: Record<string, Level> = {
   log: "info",
   info: "info",

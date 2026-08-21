@@ -1,4 +1,4 @@
-//! Application identity â€” the one place to edit when copying this template
+//! Application identity - the one place to edit when copying this template
 //! into a new app.
 //!
 //! These three constants seed every per-app OS path the core resolves: the
@@ -6,9 +6,9 @@
 //! (`service::logging`). They are deliberately the *only* hardcoded names in
 //! the project so a fork is a single-file change.
 //!
-//! On Windows the company/product become `%APPDATA%\<COMPANY>\<PRODUCT>\â€¦`;
-//! on Linux the product (lower-cased) drives `~/.config/<product>/â€¦`; on macOS
-//! the qualifier+company+product form the `â€¦/Library/Application Support/`
+//! On Windows the company/product become `%APPDATA%\<COMPANY>\<PRODUCT>\...`;
+//! on Linux the product (lower-cased) drives `~/.config/<product>/...`; on macOS
+//! the qualifier+company+product form the `.../Library/Application Support/`
 //! bundle path. Keep them in step with `productName`/`identifier` in
 //! `src-tauri/tauri.conf.json`.
 

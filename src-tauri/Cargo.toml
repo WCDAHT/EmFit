@@ -7,7 +7,7 @@ publish.workspace = true
 # Tauri 2 splits the crate into a library (mobile-shareable, holds `run()`)
 # and a thin binary that calls it. Keep both even on a desktop-only app:
 # `tauri android`/`tauri ios` need the cdylib/staticlib targets, and adding
-# them later is more churn than carrying them now. See STANDARDS Â§3.
+# them later is more churn than carrying them now. See STANDARDS sec 3.
 [lib]
 name = "emfit_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

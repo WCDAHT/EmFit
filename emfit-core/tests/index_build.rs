@@ -207,11 +207,11 @@ fn a_wide_directory_holds_every_child() {
 #[test]
 fn rollup_matches_hand_computed_totals() {
     //  C:\                        3 dirs (incl. root), 3 files, 1110 bytes
-    //  ├── docs\                  1000 + 100 = 1100
-    //  │   ├── big.bin   1000
-    //  │   └── small.txt  100
-    //  └── tmp\                   10
-    //      └── log.txt     10
+    //  +-- docs\                  1000 + 100 = 1100
+    //  |   +-- big.bin   1000
+    //  |   +-- small.txt  100
+    //  +-- tmp\                   10
+    //      +-- log.txt     10
     let (index, warnings) = build(&[
         root_entry(),
         dir(100, ROOT_FS, "docs"),
@@ -246,7 +246,7 @@ fn rollup_matches_hand_computed_totals() {
 #[test]
 fn rollup_carries_through_a_deep_chain() {
     // 500 nested directories with one file at the bottom. Also proves the
-    // traversal is iterative — a recursive rollup would risk the stack here.
+    // traversal is iterative - a recursive rollup would risk the stack here.
     const DEPTH: u64 = 500;
 
     let names: Vec<String> = (0..DEPTH).map(|i| format!("d{i}")).collect();
@@ -297,7 +297,7 @@ fn allocated_size_rolls_up_separately_from_logical_size() {
 
 #[test]
 fn entries_with_a_missing_parent_go_to_the_synthetic_folder() {
-    // 999 was never pushed — the directory containing orphan.txt is unknown.
+    // 999 was never pushed - the directory containing orphan.txt is unknown.
     let (index, warnings) = build(&[
         root_entry(),
         dir(100, ROOT_FS, "real"),

@@ -1,6 +1,6 @@
 //! Public API for the UI crate.
 //!
-//! Per STANDARDS Â§1, this crate holds all logic and depends on no UI or
+//! Per STANDARDS sec 1, this crate holds all logic and depends on no UI or
 //! Tauri types. `cargo check -p emfit-core` must succeed with `src-tauri`
 //! deleted.
 

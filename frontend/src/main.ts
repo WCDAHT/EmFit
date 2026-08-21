@@ -8,7 +8,7 @@ import App from "./App.svelte";
 // runs, so even early startup logs are captured.
 installConsoleBridge();
 
-// Apply the persisted/preferred theme before first paint (STANDARDS §2.2).
+// Apply the persisted/preferred theme before first paint (STANDARDS sec 2.2).
 initTheme();
 
 const app = mount(App, {

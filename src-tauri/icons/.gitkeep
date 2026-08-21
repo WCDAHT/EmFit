@@ -1,7 +1,7 @@
 # App icons are generated, not authored by hand.
 #
 # Drop a square source SVG/PNG at the repo root (e.g. app-icon.svg, the
-# bespoke per-app icon from STANDARDS §2.6) and run:
+# bespoke per-app icon from STANDARDS sec 2.6) and run:
 #
 #     npx tauri icon ./app-icon.svg
 #

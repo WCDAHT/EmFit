@@ -1,11 +1,11 @@
 //! Where the MFT physically lives, and how much of it can be read at once.
 //!
 //! The MFT is a file, and like any file on a used volume it is fragmented. Its
-//! extent map turns a record number into a byte offset — and, just as
+//! extent map turns a record number into a byte offset - and, just as
 //! importantly, says **how many records follow it contiguously**.
 //!
 //! That second number is what makes bulk reading correct. v1 computed the
-//! offset of a batch's first record and then read `count × 1024` bytes
+//! offset of a batch's first record and then read `count x 1024` bytes
 //! straight through; any batch spanning a fragment boundary silently ingested
 //! whatever happened to be on disk next. Returning the run length from the
 //! same lookup makes the clamp impossible to forget rather than a separate
@@ -19,9 +19,9 @@ use crate::parser::ntfs::runs::DataRun;
 /// One contiguous piece of the MFT.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Extent {
-    /// First virtual cluster — the offset *within the MFT*.
+    /// First virtual cluster - the offset *within the MFT*.
     pub vcn: u64,
-    /// First logical cluster — where it actually sits on the volume.
+    /// First logical cluster - where it actually sits on the volume.
     pub lcn: u64,
     /// Length in clusters.
     pub cluster_count: u64,
@@ -44,7 +44,7 @@ impl Extent {
 pub struct RecordLocation {
     /// Byte offset of the record, relative to the start of the volume.
     pub byte_offset: u64,
-    /// How many whole records — this one included — are contiguous on disk
+    /// How many whole records - this one included - are contiguous on disk
     /// from here. A bulk read must not exceed this.
     ///
     /// Zero means the record itself straddles a fragment boundary, which can
@@ -91,7 +91,7 @@ impl MftExtents {
                 return Err(Error::Parse {
                     format: "MFT extents".to_string(),
                     message: format!(
-                        "extent {i} starts at VCN {} but VCN {expected_vcn} was expected — \
+                        "extent {i} starts at VCN {} but VCN {expected_vcn} was expected - \
                          the map has a gap or an overlap",
                         extent.vcn
                     ),
@@ -109,7 +109,7 @@ impl MftExtents {
 
     /// The map for an MFT assumed to be one unbroken run.
     ///
-    /// Used before the real map is known — reading record 0 requires locating
+    /// Used before the real map is known - reading record 0 requires locating
     /// record 0. Correct for the first fragment of any MFT, which is all the
     /// bootstrap needs.
     pub fn contiguous(
@@ -129,7 +129,7 @@ impl MftExtents {
         )
     }
 
-    /// Build from a decoded `$DATA` run list — the path used when the
+    /// Build from a decoded `$DATA` run list - the path used when the
     /// filesystem driver will not supply retrieval pointers, such as a raw
     /// image or an unmounted volume.
     ///
@@ -201,7 +201,7 @@ impl MftExtents {
 
     /// How many records the mapped extents can hold.
     ///
-    /// An upper bound on the record count, not the number in use — the tail of
+    /// An upper bound on the record count, not the number in use - the tail of
     /// the MFT is allocated but unwritten. `$MFT`'s own data size is the real
     /// figure, and the scanner uses that when it has it.
     pub fn capacity_records(&self) -> u64 {
@@ -223,7 +223,7 @@ impl MftExtents {
         self.extents.len()
     }
 
-    /// True when the MFT is in more than one piece — which it will be on any
+    /// True when the MFT is in more than one piece - which it will be on any
     /// volume that has seen use.
     pub fn is_fragmented(&self) -> bool {
         self.extents.len() > 1
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn locates_records_in_a_contiguous_mft() {
-        // 100 clusters at LCN 1000 → 400 records.
+        // 100 clusters at LCN 1000 -> 400 records.
         let m = MftExtents::contiguous(1000, 100, CLUSTER, RECORD).unwrap();
 
         let first = m.locate(0).unwrap();
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn a_gap_in_the_map_is_rejected() {
         // VCN 5..10 is missing. Accepting this would place every record past
-        // the gap at the wrong offset — silently, and for the whole scan.
+        // the gap at the wrong offset - silently, and for the whole scan.
         let err = MftExtents::new(
             vec![extent(0, 1000, 5), extent(10, 5000, 5)],
             CLUSTER,

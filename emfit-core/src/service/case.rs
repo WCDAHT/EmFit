@@ -1,4 +1,4 @@
-//! Per-document sidecar persistence (STANDARDS §4.5).
+//! Per-document sidecar persistence (STANDARDS sec 4.5).
 //!
 //! Forensic apps routinely attach metadata to an external file the user
 //! already manages: tags on a chat export, annotations on a video, notes on

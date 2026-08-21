@@ -1,7 +1,7 @@
 // Single source of truth for the app version.
 //
 // The canonical version lives in the repo-root `VERSION` file. This script
-// propagates it into the three places the toolchain reads (STANDARDS §5.2) and
+// propagates it into the three places the toolchain reads (STANDARDS sec 5.2) and
 // verifies they agree, so a human bumps the version in exactly one place:
 //
 //   - package.json               "version"
@@ -111,7 +111,7 @@ function check() {
       wrong.push(LOCK_FILE);
     }
   }
-  if (wrong.length) die('version mismatch — run `node scripts/version.js sync` and commit');
+  if (wrong.length) die('version mismatch - run `node scripts/version.js sync` and commit');
   console.log(`version: all in sync at ${v}`);
 }
 

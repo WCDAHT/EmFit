@@ -1,8 +1,8 @@
 <!--
-  TreeView.svelte — the space-analysis tab (roadmap M3): folder tree on top,
+  TreeView.svelte - the space-analysis tab (roadmap M3): folder tree on top,
   treemap below, file types beside it. Selection is shared through
   `session.focus`: click a rectangle and the tree reveals it. Drilling the
-  map happens only from the map itself (double-click / breadcrumb) — the
+  map happens only from the map itself (double-click / breadcrumb) - the
   tree never re-roots it.
 
   The horizontal splitter resizes the treemap row; the new height applies on
@@ -18,8 +18,8 @@
    *  2026-07-27). The component and its plumbing stay alive behind this. */
   const SHOW_TYPES_PANEL = false;
 
-  /** "Top files" / "Top folders" (features.md §4.4): the List tab already is
-   *  that view once kind-filtered and size-sorted — jump it there. */
+  /** "Top files" / "Top folders" (features.md sec 4.4): the List tab already is
+   *  that view once kind-filtered and size-sorted - jump it there. */
   function topN(kind: "file" | "folder") {
     session.text = `${kind}:`;
     session.tab = "list";
@@ -35,7 +35,7 @@
   let ghostY = $state(0);
   let bottomEl: HTMLDivElement | undefined = $state();
 
-  /** Space the rest of the view keeps at minimum — controls, a usable
+  /** Space the rest of the view keeps at minimum - controls, a usable
    *  slice of the folder tree, status bar. Must match the drag clamp. */
   const RESERVED_ABOVE = 240;
   const MIN_MAP_H = 140;
@@ -44,7 +44,7 @@
 
   /** The splitter stores the DESIRED height; what renders is re-clamped
    *  against the live window height, so shrinking the window can never let
-   *  the map swallow the folder tree — and growing it back restores the
+   *  the map swallow the folder tree - and growing it back restores the
    *  user's chosen height untouched. */
   const mapHeight = $derived(
     session.treemapHeight === null
@@ -83,7 +83,7 @@
 />
 
 <!-- Depth, color mode, and units now live in the Settings dialog (native
-     View menu) — the toolbar keeps only view jumps. The treemap-depth and
+     View menu) - the toolbar keeps only view jumps. The treemap-depth and
      size-mode session state stays alive underneath. -->
 <div class="controls">
   <span class="flex"></span>

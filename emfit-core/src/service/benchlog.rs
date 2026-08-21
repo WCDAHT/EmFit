@@ -1,7 +1,7 @@
-//! BenchLog: append-only JSONL of operation timings (STANDARDS §5.5).
+//! BenchLog: append-only JSONL of operation timings (STANDARDS sec 5.5).
 //!
 //! One event per line, written to the same directory as the application logs.
-//! When an operation's speed matters to users — a full MFT sweep, an export —
+//! When an operation's speed matters to users - a full MFT sweep, an export -
 //! the operation records how long it took, so a regression shows up in a file
 //! instead of a feeling.
 //!
@@ -82,7 +82,7 @@ pub fn append_to(
             source,
         })?;
 
-    // One serde_json line per event — correct escaping for any volume label
+    // One serde_json line per event - correct escaping for any volume label
     // or error text, unlike v1's hand-rolled writers.
     writeln!(file, "{}", serde_json::Value::Object(event)).map_err(|source| Error::Io {
         path: path.to_path_buf(),
@@ -90,7 +90,7 @@ pub fn append_to(
     })
 }
 
-/// RFC 3339 UTC, seconds precision — matches the example in STANDARDS §5.5.
+/// RFC 3339 UTC, seconds precision - matches the example in STANDARDS sec 5.5.
 fn timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }

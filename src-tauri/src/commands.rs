@@ -1,15 +1,15 @@
 //! `#[tauri::command]` functions: the webview's only entry into Rust.
 //!
-//! Per STANDARDS §3.4 these stay *thin*: parse/validate arguments, call into
+//! Per STANDARDS sec 3.4 these stay *thin*: parse/validate arguments, call into
 //! `emfit-core`, map the result to a `Serialize` type or `CommandError`.
 //! Long work (scanning, searching, sorting) runs on worker threads that hold
 //! clones of the shared state; results come back to the webview as events:
 //!
-//! - `scan:progress` — [`ScanProgressDto`], throttled by the core sweep
-//! - `scan:done`     — [`ScanDoneDto`], one per volume
-//! - `view:updated`  — [`ViewUpdatedDto`], after every completed query/sort
+//! - `scan:progress` - [`ScanProgressDto`], throttled by the core sweep
+//! - `scan:done`     - [`ScanDoneDto`], one per volume
+//! - `view:updated`  - [`ViewUpdatedDto`], after every completed query/sort
 //!
-//! The row-window contract (features.md §9): the index never crosses IPC.
+//! The row-window contract (features.md sec 9): the index never crosses IPC.
 //! The webview calls [`get_rows`] for the window its viewport shows, and
 //! nothing more.
 //!
@@ -69,14 +69,14 @@ pub fn elevation_status() -> bool {
     elevation::is_elevated()
 }
 
-/// The one-click fix when it can't (features.md §1.1).
+/// The one-click fix when it can't (features.md sec 1.1).
 #[tauri::command]
 pub fn relaunch_elevated() -> CommandResult<()> {
     elevation::relaunch_elevated()?;
     Ok(())
 }
 
-/// Scan the given targets — mounted volumes in parallel, then any disk
+/// Scan the given targets - mounted volumes in parallel, then any disk
 /// images. Returns immediately; progress and completion arrive as events
 /// keyed by the target's `key`.
 #[tauri::command]
@@ -119,7 +119,7 @@ pub fn start_scan(
         // new indexes.
         requery(&app, false);
 
-        // Fresh indexes → fresh deletion watchers (roadmap M5).
+        // Fresh indexes -> fresh deletion watchers (roadmap M5).
         crate::watch::respawn_all(&app);
 
         // Everything-style fast sort: precompute every column's ordering in
@@ -356,7 +356,7 @@ pub fn set_query(app: AppHandle, state: State<'_, AppState>, raw: RawQueryDto) {
 }
 
 /// Change the sort order. Re-sorts the current hits without re-filtering
-/// (features.md §3: stable, cached sort).
+/// (features.md sec 3: stable, cached sort).
 #[tauri::command]
 pub fn set_sort(app: AppHandle, state: State<'_, AppState>, sort: SortDto) {
     {
@@ -434,7 +434,7 @@ pub fn list_presets() -> Vec<PresetDto> {
 }
 
 // ---------------------------------------------------------------------------
-// space analysis (the Tree view tab — features.md §4)
+// space analysis (the Tree view tab - features.md sec 4)
 // ---------------------------------------------------------------------------
 
 /// The folder tree's top level: one row per scanned volume.
@@ -446,7 +446,7 @@ pub fn tree_roots(state: State<'_, AppState>) -> Vec<TreeRowDto> {
     tree::roots(&indices).into_iter().map(Into::into).collect()
 }
 
-/// One directory's children, largest first — lazy materialization from the
+/// One directory's children, largest first - lazy materialization from the
 /// CSR ranges, so expanding a 100k-child folder is one call.
 #[tauri::command]
 pub fn tree_children(state: State<'_, AppState>, vol: u16, id: u32) -> Vec<TreeRowDto> {
@@ -469,7 +469,7 @@ pub fn node_lineage(state: State<'_, AppState>, vol: u16, id: u32) -> Vec<u32> {
 }
 
 /// The squarified treemap for the current canvas and drill level, computed
-/// in Rust and returned as a flat rectangle list (features.md §9).
+/// in Rust and returned as a flat rectangle list (features.md sec 9).
 #[tauri::command]
 pub fn treemap_layout(
     state: State<'_, AppState>,
@@ -502,7 +502,7 @@ pub fn treemap_layout(
         .collect()
 }
 
-/// Aggregate every file by extension (features.md §4.3).
+/// Aggregate every file by extension (features.md sec 4.3).
 #[tauri::command]
 pub fn type_breakdown(state: State<'_, AppState>, limit: usize) -> Vec<TypeRowDto> {
     let inner = state.inner.lock().unwrap();
@@ -541,9 +541,9 @@ pub fn node_info(state: State<'_, AppState>, vol: u16, id: u32) -> Option<NodeIn
 
 /// Show the native shell context menu for a node, at the cursor (roadmap
 /// M4). The menu is tracked on the main thread with the app window as its
-/// owner — the window is foreground from the very right-click, which is
-/// what keeps the menu open (see `shell_menu`). Verbs — including any the
-/// user picks that mutate the filesystem — are the shell's business, and
+/// owner - the window is foreground from the very right-click, which is
+/// what keeps the menu open (see `shell_menu`). Verbs - including any the
+/// user picks that mutate the filesystem - are the shell's business, and
 /// the index does not react until a rescan (deletion marking arrives with
 /// M5's journal watcher).
 #[tauri::command]
@@ -613,12 +613,12 @@ pub fn show_context_menu(
 // the search worker
 // ---------------------------------------------------------------------------
 
-/// Re-run the view pipeline on a worker thread: parse → (search) → sort →
-/// install → `view:updated`.
+/// Re-run the view pipeline on a worker thread: parse -> (search) -> sort ->
+/// install -> `view:updated`.
 ///
 /// `sort_only` skips the filter pass and re-sorts the current hits. A worker
 /// only installs its result when the generation it started under is still
-/// current — that is what makes the query interruptible: the next keystroke
+/// current - that is what makes the query interruptible: the next keystroke
 /// bumps the generation and cancels the token, and the stale worker's work
 /// is discarded.
 fn requery(app: &AppHandle, sort_only: bool) {

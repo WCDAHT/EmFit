@@ -18,7 +18,7 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # toml and chrono are pre-staged for the first config and timestamp work
-# (STANDARDS Â§4.4 config, Â§5.5 BenchLog timestamps). Remove if unused after
+# (STANDARDS sec 4.4 config, sec 5.5 BenchLog timestamps). Remove if unused after
 # the first real app is built.
 toml = "1.1"
 chrono = { version = "0.4", default-features = false, features = ["serde", "now"] }
@@ -26,21 +26,21 @@ thiserror = "2"
 anyhow = "1"
 # Parallel MFT record parsing (roadmap M1: "rayon across the buffer").
 rayon = "1"
-# The search's regex filter field (roadmap M2, features.md §2).
+# The search's regex filter field (roadmap M2, features.md sec 2).
 regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# File logging: daily-rotating appender with N-file retention (STANDARDS Â§4.2).
+# File logging: daily-rotating appender with N-file retention (STANDARDS sec 4.2).
 # Part of the official tokio-rs/tracing project, the canonical companion to
-# tracing-subscriber â€” not a niche crate.
+# tracing-subscriber - not a niche crate.
 tracing-appender = "0.2"
 directories = "6"
 
 # --- Windows only ---
 # Volume discovery and elevation (`service::volume`, `service::elevation`).
 # Pulled in through a `[target.'cfg(windows)'.dependencies]` block, so the core
-# still compiles on Linux and macOS with those paths stubbed — which CI needs
-# (STANDARDS §5.2). Everything else in the engine, including raw device reads,
+# still compiles on Linux and macOS with those paths stubbed - which CI needs
+# (STANDARDS sec 5.2). Everything else in the engine, including raw device reads,
 # goes through `std` and needs no bindings.
 windows = { version = "0.62", features = [
   "Win32_Foundation",
@@ -80,9 +80,9 @@ unused_must_use = "deny"
 all = { level = "warn", priority = -1 }
 
 # `tauri dev` runs the DEBUG profile: at opt-level 0 the engine's tight
-# loops (MFT sweep, match-all search, 3M-row sorts) run 10-50× slower than
+# loops (MFT sweep, match-all search, 3M-row sorts) run 10-50x slower than
 # release, which makes perceived performance unjudgeable in dev. Optimize
-# the engine crate and all dependencies even in dev — they are built once
+# the engine crate and all dependencies even in dev - they are built once
 # and cached; the shell crate stays at 0 for fast edit-compile cycles.
 [profile.dev.package."*"]
 opt-level = 2
@@ -97,7 +97,7 @@ inherits = "release"
 debug = true
 strip = false
 
-# Release profile per STANDARDS Â§5.2. Tuned for shippable artifact size.
+# Release profile per STANDARDS sec 5.2. Tuned for shippable artifact size.
 [profile.release]
 opt-level = "z"
 lto = true

@@ -9,7 +9,7 @@ name: Release
 #     major -> the canonical VERSION is bumped, committed, tagged, and published.
 #
 # The version lives in one file (`VERSION`) and is propagated to package.json,
-# Cargo.toml, tauri.conf.json, and package-lock.json by scripts/version.js — so a
+# Cargo.toml, tauri.conf.json, and package-lock.json by scripts/version.js - so a
 # human only ever decides the bump level (or the tag), never edits versions by hand.
 
 env:

@@ -1,7 +1,7 @@
-//! Application logging (STANDARDS Â§4.2).
+//! Application logging (STANDARDS sec 4.2).
 //!
 //! `tracing` everywhere, funnelled into a detailed, plain-text log file under
-//! the OS data directory. This module is copied verbatim into new apps â€” keep
+//! the OS data directory. This module is copied verbatim into new apps - keep
 //! it project-agnostic (identity comes from [`crate::app`], the only per-app
 //! knobs are the two constants below).
 //!
@@ -12,13 +12,13 @@
 //! - **No colour symbols.** ANSI escapes are disabled on the file layer, so
 //!   the log is greppable plain text, not terminal-control gibberish.
 //! - **Timestamped.** Every line is prefixed with a millisecond UTC timestamp
-//!   via [`UtcTimer`] â€” unambiguous across timezones.
+//!   via [`UtcTimer`] - unambiguous across timezones.
 //! - **Very detailed.** Level, target, and source file:line are all recorded,
 //!   and our own crates log at `debug` by default.
 //!
 //! A second, human-friendly layer writes to stdout so `tauri dev` still shows
 //! logs in the terminal. Both layers share one [`EnvFilter`]; `RUST_LOG`
-//! overrides the default (STANDARDS Â§4.4: env vars for deployment knobs only).
+//! overrides the default (STANDARDS sec 4.4: env vars for deployment knobs only).
 //!
 //! Call [`init`] once, as early as possible in the shell's `run()`. It is
 //! best-effort: if the log directory can't be created it falls back to
@@ -86,7 +86,7 @@ impl FormatTime for UtcTimer {
 /// Returns the resolved log directory on success so the caller can report it.
 /// On failure to set up the file (e.g. unresolvable/uncreatable directory) it
 /// logs a warning to stdout, installs a stdout-only subscriber, and returns the
-/// error â€” the app keeps running, just without a log file.
+/// error - the app keeps running, just without a log file.
 pub fn init() -> Result<PathBuf> {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn log_dir_is_under_product_data_dir() {
         // The path should resolve and end with our log sub-directory. We don't
-        // assert the full prefix (it's OS/user-specific) â€” just the tail.
+        // assert the full prefix (it's OS/user-specific) - just the tail.
         let dir = log_dir().expect("log dir should resolve in a test environment");
         assert!(dir.ends_with(LOG_DIR_NAME), "got {}", dir.display());
         assert!(

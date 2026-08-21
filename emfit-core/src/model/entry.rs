@@ -2,8 +2,8 @@
 //!
 //! `RawEntry` is the seam's currency: every filesystem, however it stores its
 //! metadata, can produce this. Names are **borrowed** from the scanner's read
-//! buffer — the sink copies what it needs before returning, which is what keeps
-//! the hot path allocation-free. See `architecture.md` §5.
+//! buffer - the sink copies what it needs before returning, which is what keeps
+//! the hot path allocation-free. See `architecture.md` sec 5.
 
 use std::ops::BitOr;
 
@@ -63,7 +63,7 @@ impl EntryFlags {
     pub const HIDDEN: Self = Self(1 << 1);
     /// Owned by the operating system.
     pub const SYSTEM: Self = Self(1 << 2);
-    /// A reparse point, junction, or symbolic link. Never followed — doing so
+    /// A reparse point, junction, or symbolic link. Never followed - doing so
     /// would count the target's bytes twice.
     pub const REPARSE: Self = Self(1 << 3);
     /// Sparse: allocated size is meaningfully below logical size.
@@ -71,7 +71,7 @@ impl EntryFlags {
     /// Stored compressed.
     pub const COMPRESSED: Self = Self(1 << 5);
     /// **Not present on the filesystem.** The builder invents a small number
-    /// of nodes — a root when the scan produced none, and the folder that
+    /// of nodes - a root when the scan produced none, and the folder that
     /// collects unrooted entries. Flagged so the UI can render them
     /// distinctly and exports can disclose them rather than passing them off
     /// as real files.

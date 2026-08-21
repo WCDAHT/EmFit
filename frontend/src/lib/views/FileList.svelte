@@ -1,10 +1,10 @@
 <!--
-  FileList.svelte — the virtualized result table (features.md §3).
+  FileList.svelte - the virtualized result table (features.md sec 3).
 
   Only the visible window of rows ever exists in the DOM or crosses IPC:
   scrolling asks Rust for `rows(offset, count)` and renders what comes back.
 
-  Deviation note (STANDARDS §3.2 suggests a library for virtualized lists):
+  Deviation note (STANDARDS sec 3.2 suggests a library for virtualized lists):
   the row source here is a Rust-side window API, not a client-side array,
   which is the shape the maintained virtual-list libraries assume. Windowing
   a fixed-row-height table over an async source is ~60 lines below; a library
@@ -12,7 +12,7 @@
 
   Very large sets exceed the browser's element-height cap (~33M px), so the
   scroller runs in one of two modes:
-  - exact: spacer = total × rowHeight, rows positioned absolutely. Pixel-true.
+  - exact: spacer = total x rowHeight, rows positioned absolutely. Pixel-true.
   - proportional: spacer capped, scrollTop maps linearly onto the row range
     and rows render viewport-locked. Engaged only past ~1M rows.
 -->
@@ -258,9 +258,9 @@
                     class="match">{seg.text}</b
                   >{:else}{seg.text}{/if}{/each}</span
             >
-            {#if row.is_alias}<span class="badge" title="Hard link — bytes counted under another name">link</span>{/if}
+            {#if row.is_alias}<span class="badge" title="Hard link - bytes counted under another name">link</span>{/if}
             {#if row.is_synthetic}<span class="badge" title="Not a file on the volume">virtual</span>{/if}
-            {#if row.is_reparse}<span class="badge" title="Reparse point / junction — not followed">junction</span>{/if}
+            {#if row.is_reparse}<span class="badge" title="Reparse point / junction - not followed">junction</span>{/if}
           </span>
           <span class="cell numeric">{formatSize(row.size)}</span>
           <span class="cell numeric">{formatSize(row.allocated)}</span>
@@ -389,7 +389,7 @@
     background: var(--surface-hover);
   }
   .row.selected {
-    /* Selection blue, not brand orange: "the user picked this" (§2.2). */
+    /* Selection blue, not brand orange: "the user picked this" (sec 2.2). */
     background: var(--selection-soft);
     outline: 1px solid var(--selection);
     outline-offset: -1px;

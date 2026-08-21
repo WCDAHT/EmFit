@@ -1,6 +1,6 @@
 //! The search query: what the user typed, parsed into something executable.
 //!
-//! One `Query` captures the whole feature set of features.md §2 that M2
+//! One `Query` captures the whole feature set of features.md sec 2 that M2
 //! ships: substring and wildcard patterns, semicolon-OR multi-patterns,
 //! backtick path scoping, a separate regex field, size / date / extension
 //! filters, and the inline `ext:` `size:` `dm:` `folder:` / `file:`
@@ -11,7 +11,7 @@
 //! unintelligible is skipped and reported in [`Query::warnings`]; the rest of
 //! the query still runs.
 //!
-//! A `Query` is volume-independent — patterns are stored as typed; the
+//! A `Query` is volume-independent - patterns are stored as typed; the
 //! searcher folds them per volume, because case rules are a per-volume
 //! property ([`CaseFold`]).
 //!
@@ -80,7 +80,7 @@ pub struct RawQuery {
     /// The main search box: patterns, `;`-separated OR terms, inline
     /// operators, optional backtick-quoted path scope.
     pub text: String,
-    /// The separate regex field (features.md §2). Applied to the name, ANDed
+    /// The separate regex field (features.md sec 2). Applied to the name, ANDed
     /// with everything else.
     pub regex: String,
     /// Size filter field: `>10MB`, `<1GB`, `10MB..1GB`.
@@ -134,7 +134,7 @@ impl Query {
             && self.regex.is_none()
     }
 
-    /// Parse the UI's raw strings. Never fails — see the module docs.
+    /// Parse the UI's raw strings. Never fails - see the module docs.
     pub fn parse(raw: &RawQuery) -> Self {
         let mut q = Query {
             include_hidden: raw.include_hidden,
@@ -184,7 +184,7 @@ impl Query {
             }
         }
 
-        // Multi-pattern: semicolon-separated terms, OR'd. Dots are kept —
+        // Multi-pattern: semicolon-separated terms, OR'd. Dots are kept -
         // `.pdf` is a substring pattern, unlike in the `ext:` list.
         for term in pattern_text.split(';') {
             let term = term.trim();
@@ -251,7 +251,7 @@ fn extract_scope(text: &str, q: &mut Query) -> String {
 /// Case-insensitive operator prefix match (`EXT:` works too).
 ///
 /// Compared as BYTES, not a `str` slice: `token[..op.len()]` panics when a
-/// multi-byte character straddles the cut (searching for `пр` took down the
+/// multi-byte character straddles the cut (a Cyrillic prefix took down the
 /// search worker this way). Operators are pure ASCII, so a byte match also
 /// guarantees the split point is a char boundary.
 fn strip_operator<'a>(token: &'a str, op: &str) -> Option<&'a str> {
@@ -294,12 +294,12 @@ fn parse_size_filter(text: &str) -> Option<(u64, u64)> {
         };
         return (lo <= hi).then_some((lo, hi));
     }
-    // Bare value: "at least this big" — the question a space analyzer is
+    // Bare value: "at least this big" - the question a space analyzer is
     // usually asked.
     Some((parse_size(text)?, u64::MAX))
 }
 
-/// `10`, `10kb`, `1.5GB` — binary units, matching the display side.
+/// `10`, `10kb`, `1.5GB` - binary units, matching the display side.
 fn parse_size(text: &str) -> Option<u64> {
     let text = text.trim().to_ascii_lowercase();
     let digits = text.trim_end_matches(char::is_alphabetic);
@@ -402,16 +402,24 @@ mod tests {
     #[test]
     fn non_ascii_tokens_parse_without_panicking() {
         // Regression: the operator-prefix check sliced `token[..op.len()]`,
-        // which panics when the cut lands inside a multi-byte char — every
+        // which panics when the cut lands inside a multi-byte char - every
         // Cyrillic keystroke killed the search worker.
-        for text in ["пр", "при", "привет", "日本語", "é", "пр ext:pdf"] {
+        // Cyrillic prefixes, a Japanese word, and one accented letter.
+        for text in [
+            "\u{43f}\u{440}",
+            "\u{43f}\u{440}\u{438}",
+            "\u{43f}\u{440}\u{438}\u{432}\u{435}\u{442}",
+            "\u{65e5}\u{672c}\u{8a9e}",
+            "\u{e9}",
+            "\u{43f}\u{440} ext:pdf",
+        ] {
             let q = parse_text(text);
             assert!(
                 !q.patterns.is_empty(),
                 "`{text}` should produce a pattern"
             );
         }
-        let q = parse_text("пр ext:pdf");
+        let q = parse_text("\u{43f}\u{440} ext:pdf");
         assert_eq!(q.extensions, vec!["pdf".to_string()]);
     }
 

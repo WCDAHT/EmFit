@@ -1,9 +1,9 @@
 //! Serialize-able data-transfer types for the IPC boundary.
 //!
-//! Core types stay serde-for-IPC-free (STANDARDS §1): the shell owns the
+//! Core types stay serde-for-IPC-free (STANDARDS sec 1): the shell owns the
 //! `Serialize`/`Deserialize` shapes the webview sees. This module holds those
 //! shapes plus `From` conversions from the core types they mirror. Field
-//! names are snake_case on both sides — the matching TypeScript interfaces
+//! names are snake_case on both sides - the matching TypeScript interfaces
 //! live in `frontend/src/lib/types.ts` and must stay in step.
 
 use emfit_core::model::volume::VolumeInfo;
@@ -58,8 +58,8 @@ pub struct ScanProgressDto {
     pub progress: ProgressDto,
 }
 
-/// Payload of the `scan:done` event, one per volume — per-volume failure
-/// isolation (features.md §7): one drive failing reports here while the
+/// Payload of the `scan:done` event, one per volume - per-volume failure
+/// isolation (features.md sec 7): one drive failing reports here while the
 /// others carry on.
 #[derive(Serialize, Debug, Clone)]
 pub struct ScanDoneDto {
@@ -156,7 +156,7 @@ pub struct SortDto {
 }
 
 impl SortDto {
-    /// Unknown keys fall back to the default rather than erroring — a stale
+    /// Unknown keys fall back to the default rather than erroring - a stale
     /// frontend must not wedge the view.
     pub fn to_sort(&self) -> Sort {
         let key = match self.key.as_str() {
@@ -176,7 +176,7 @@ impl SortDto {
     }
 }
 
-/// One display row (features.md §9: pre-formatted strings plus ids, never
+/// One display row (features.md sec 9: pre-formatted strings plus ids, never
 /// full nodes).
 #[derive(Serialize, Debug, Clone)]
 pub struct RowDto {
@@ -198,7 +198,7 @@ pub struct RowDto {
     pub is_alias: bool,
     pub is_synthetic: bool,
     pub is_reparse: bool,
-    /// UTF-16 spans of `name` the query matched — the list bolds them.
+    /// UTF-16 spans of `name` the query matched - the list bolds them.
     /// Filled by `get_rows` for the visible window; empty on a blank query.
     pub match_ranges: Vec<(u32, u32)>,
 }
@@ -244,7 +244,7 @@ pub struct RowWindowDto {
 #[derive(Serialize, Debug, Clone)]
 pub struct ViewUpdatedDto {
     pub generation: u64,
-    /// Result count, with its elapsed time (features.md §2).
+    /// Result count, with its elapsed time (features.md sec 2).
     pub total: u64,
     pub elapsed_ms: u64,
     /// Query-parse warnings to surface (bad size filter, invalid regex).
@@ -291,7 +291,7 @@ impl From<Preset> for PresetDto {
     }
 }
 
-/// One folder-tree row (features.md §4.1).
+/// One folder-tree row (features.md sec 4.1).
 #[derive(Serialize, Debug, Clone)]
 pub struct TreeRowDto {
     pub vol: u16,
@@ -337,7 +337,7 @@ impl From<TreeRow> for TreeRowDto {
     }
 }
 
-/// One treemap rectangle (features.md §4.2, §9 — layout computed in Rust).
+/// One treemap rectangle (features.md sec 4.2, sec 9 - layout computed in Rust).
 #[derive(Serialize, Debug, Clone)]
 pub struct TreemapRectDto {
     pub vol: u16,
@@ -395,7 +395,7 @@ pub struct DrillDto {
 }
 
 /// Payload of the `usn:deleted` event: nodes newly observed deleted
-/// (roadmap M5 — marks only, cleared by the next rescan).
+/// (roadmap M5 - marks only, cleared by the next rescan).
 #[derive(Serialize, Debug, Clone)]
 pub struct UsnDeletedDto {
     pub vol: u16,
@@ -410,14 +410,14 @@ pub struct UsnGapDto {
 }
 
 /// Payload of the `menu:zoom` event: the user picked "Zoom in" on a folder
-/// in the shell context menu — the treemap drills into it.
+/// in the shell context menu - the treemap drills into it.
 #[derive(Serialize, Debug, Clone, Copy)]
 pub struct MenuZoomDto {
     pub vol: u16,
     pub id: u32,
 }
 
-/// One extension's share (features.md §4.3).
+/// One extension's share (features.md sec 4.3).
 #[derive(Serialize, Debug, Clone)]
 pub struct TypeRowDto {
     pub extension: String,

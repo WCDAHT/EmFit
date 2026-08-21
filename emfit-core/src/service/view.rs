@@ -1,14 +1,14 @@
 //! The result view: sorted hits and row windows.
 //!
-//! This is the Rust half of the row-window IPC contract (features.md §9):
+//! This is the Rust half of the row-window IPC contract (features.md sec 9):
 //! the index never crosses to the webview. The shell keeps the current
 //! query's hits here; the frontend asks for `rows(offset, count)` and gets
-//! back **pre-formatted display strings plus ids** — never full nodes, never
+//! back **pre-formatted display strings plus ids** - never full nodes, never
 //! the whole set.
 //!
 //! Sorting is stable (ties keep their previous order, so re-sorting a
-//! filtered view by another column feels incremental, features.md §3) and
-//! runs off the UI thread — the shell calls it from a worker.
+//! filtered view by another column feels incremental, features.md sec 3) and
+//! runs off the UI thread - the shell calls it from a worker.
 
 use std::cmp::Ordering;
 
@@ -50,7 +50,7 @@ impl Default for Sort {
 
 /// Sort hits in place, stably.
 ///
-/// Display ordering uses [`CaseFold::Simple`] regardless of volume — the
+/// Display ordering uses [`CaseFold::Simple`] regardless of volume - the
 /// per-volume `$UpCase` rule governs *matching*, but one list mixing two
 /// volumes needs one consistent collation.
 pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
@@ -60,12 +60,12 @@ pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
 
     // Every arm derives its key ONCE per hit (`par_sort_by_cached_key` /
     // decoration), never per comparison: a comparator that folds or
-    // classifies inline runs n·log n times — ~70M for a 3M-row view, which
+    // classifies inline runs n*log n times - ~70M for a 3M-row view, which
     // profiled as ~9 s of pure sort. Char-wise folded comparison and
     // comparing pre-folded `String`s order identically (char code-point
     // order == UTF-8 byte order), and the transient key allocations are the
     // same accepted tradeoff as the Path decoration below. Rayon spreads
-    // both the key construction and the sort across cores — the string
+    // both the key construction and the sort across cores - the string
     // sorts profiled ~57% in key allocation, ~37% in the sort itself, both
     // of which parallelize; stability is preserved.
     let folded = |s: &str| -> String { s.chars().map(|c| fold.fold(c)).collect() };
@@ -83,8 +83,8 @@ pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
         }),
         SortKey::Path => {
             // Paths are assembled strings; comparing by walking parents for
-            // every comparison would be O(depth · n log n). Decorate once
-            // instead — the cost is one path string per hit, held only for
+            // every comparison would be O(depth * n log n). Decorate once
+            // instead - the cost is one path string per hit, held only for
             // the duration of the sort.
             let mut decorated: Vec<(String, Hit)> = hits
                 .par_iter()
@@ -105,13 +105,13 @@ pub fn sort_hits(indices: &[&Index], hits: &mut [Hit], sort: Sort) {
 /// One column's precomputed total ordering across the whole volume set:
 /// `ranks[vol][node_id] = position of that node in the column's ascending
 /// global order`. Everything's "fast sort" trick: the index is immutable
-/// between scans, so each column's order can be computed ONCE — after
+/// between scans, so each column's order can be computed ONCE - after
 /// which sorting any hit subset, filtered or not, is integer-key work
 /// ([`sort_by_ranks`]), never string folding or node chasing.
 pub type SortRanks = Vec<std::sync::Arc<[u32]>>;
 
 /// Build the rank table for one column. Costs one full sort of every node
-/// (the same work one uncached sort of a match-all view does) — intended to
+/// (the same work one uncached sort of a match-all view does) - intended to
 /// run once per scan per column, off the query path.
 pub fn build_ranks(indices: &[&Index], key: SortKey) -> SortRanks {
     let mut all: Vec<Hit> = indices
@@ -137,7 +137,7 @@ pub fn build_ranks(indices: &[&Index], key: SortKey) -> SortRanks {
         .collect()
 }
 
-/// Order hits by a precomputed rank table — the fast path for every sort
+/// Order hits by a precomputed rank table - the fast path for every sort
 /// after the first. Unstable is safe: ranks are a permutation, so keys are
 /// unique and there are no equal elements to keep stable.
 pub fn sort_by_ranks(hits: &mut [Hit], ranks: &SortRanks, ascending: bool) {
@@ -170,7 +170,7 @@ fn effective_allocated(indices: &[&Index], (vol, id): Hit) -> u64 {
 /// One display row: everything the list needs, nothing more.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
-    /// Volume slot + node id — the handle for selection and future actions.
+    /// Volume slot + node id - the handle for selection and future actions.
     pub vol: u16,
     pub id: u32,
     pub name: String,

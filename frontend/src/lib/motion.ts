@@ -1,10 +1,10 @@
-//! Motion constants for Svelte JS transitions (in:fly, in:fade, …).
+//! Motion constants for Svelte JS transitions (in:fly, in:fade, ...).
 //!
 //! Svelte transitions take JS numbers, so they can't read the CSS `--duration-*`
 //! / `--ease-*` tokens in theme.css via var(). This module is the JS-side
 //! mirror of those tokens; keep the two in lockstep. CSS transitions (hover,
-//! etc.) reference the CSS tokens directly — use these only where a transition
-//! is driven from script. See STANDARDS §2 (Motion).
+//! etc.) reference the CSS tokens directly - use these only where a transition
+//! is driven from script. See STANDARDS sec 2 (Motion).
 
 import { cubicOut } from "svelte/easing";
 

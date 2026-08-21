@@ -1,5 +1,5 @@
 //! File-type breakdown: what kind of thing is eating the disk
-//! (features.md §4.3, WizTree's "File Types" tab).
+//! (features.md sec 4.3, WizTree's "File Types" tab).
 //!
 //! One pass over the flat node array, aggregating by extension. Hard-link
 //! aliases contribute their *count* (they are real paths) but zero allocated

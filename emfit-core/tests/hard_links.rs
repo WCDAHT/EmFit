@@ -8,7 +8,7 @@
 //! - Keep them naively and a WinSxS-heavy volume reports several times the
 //!   disk it actually uses.
 //!
-//! The resolution — the same one WizTree reaches — is that every name is a
+//! The resolution - the same one WizTree reaches - is that every name is a
 //! real entry with the file's logical size, while exactly one of them carries
 //! the allocated bytes. `total_size` then answers "how much file is listed
 //! here" and `total_allocated` answers "how much disk does this cost", and
@@ -79,7 +79,7 @@ fn alias(index: u64, parent_id: u64, name: &str) -> RawEntry<'_> {
     }
 }
 
-/// `C:\hltest` holding one 100 MiB file under four names — the fixture the
+/// `C:\hltest` holding one 100 MiB file under four names - the fixture the
 /// WizTree comparison was run against.
 fn build_fixture() -> Index {
     let mut builder = IndexBuilder::new(caps(), CancellationToken::new());
@@ -134,7 +134,7 @@ fn the_folder_lists_four_files_but_costs_one() {
     assert_eq!(
         folder.total_allocated(),
         SIZE,
-        "one file's worth of disk — counting each link would quadruple it"
+        "one file's worth of disk - counting each link would quadruple it"
     );
 }
 
@@ -170,7 +170,7 @@ fn aliases_are_identifiable_and_the_owner_is_not() {
 #[test]
 fn every_link_reports_the_one_record_it_describes() {
     // The alias ids are distinct so the builder can key on them, but each must
-    // still identify the single file on disk — that is what open-by-id and
+    // still identify the single file on disk - that is what open-by-id and
     // change tracking rely on.
     let index = build_fixture();
 
