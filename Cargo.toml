@@ -28,6 +28,9 @@ anyhow = "1"
 rayon = "1"
 # The search's regex filter field (roadmap M2, features.md sec 2).
 regex = "1"
+# Diacritic-insensitive matching (features.md sec 2): canonical decomposition
+# gives the base character a search for `e` must also find in `resume`.
+unicode-normalization = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # File logging: daily-rotating appender with N-file retention (STANDARDS sec 4.2).

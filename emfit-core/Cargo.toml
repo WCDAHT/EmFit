@@ -21,6 +21,8 @@ chrono = { workspace = true }
 rayon = { workspace = true }
 # Search's regex filter field (service::query).
 regex = { workspace = true }
+# Diacritic folding for the matcher (service::fold).
+unicode-normalization = { workspace = true }
 # Scan-cache container (service::cache): section compression and checksums.
 lz4_flex = { workspace = true }
 twox-hash = { workspace = true }

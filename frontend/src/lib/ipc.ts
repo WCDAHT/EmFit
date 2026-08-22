@@ -11,6 +11,7 @@ import type {
   NodeInfoDto,
   NodeRef,
   PresetDto,
+  SyntaxSectionDto,
   RawQueryDto,
   RowWindowDto,
   ScanTarget,
@@ -108,6 +109,11 @@ export function selectionSummary(
 /** The `Filters.csv` presets (built-in, or the user's own file). */
 export function listPresets(): Promise<PresetDto[]> {
   return invoke("list_presets");
+}
+
+/** The query language, for the Search syntax dialog. */
+export function searchSyntax(): Promise<SyntaxSectionDto[]> {
+  return invoke("search_syntax");
 }
 
 /** Folder-tree top level: one row per scanned volume. */

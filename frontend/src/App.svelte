@@ -14,6 +14,7 @@
   import About from "./lib/components/About.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import ShortcutsDialog from "./lib/components/ShortcutsDialog.svelte";
+  import SyntaxDialog from "./lib/components/SyntaxDialog.svelte";
   import ScanControls from "./lib/views/ScanControls.svelte";
   import ScanStatus from "./lib/views/ScanStatus.svelte";
   import SearchBar from "./lib/views/SearchBar.svelte";
@@ -42,6 +43,7 @@
   let aboutOpen = $state(false);
   let settingsOpen = $state(false);
   let shortcutsOpen = $state(false);
+  let syntaxOpen = $state(false);
 
   onMount(() => {
     const unlisteners: Promise<UnlistenFn>[] = [
@@ -146,6 +148,9 @@
             break;
           case "settings":
             settingsOpen = true;
+            break;
+          case "syntax":
+            syntaxOpen = true;
             break;
           case "shortcuts":
             shortcutsOpen = true;
@@ -262,6 +267,7 @@
 <About open={aboutOpen} onClose={() => (aboutOpen = false)} />
 <Settings open={settingsOpen} onClose={() => (settingsOpen = false)} />
 <ShortcutsDialog open={shortcutsOpen} onClose={() => (shortcutsOpen = false)} />
+<SyntaxDialog open={syntaxOpen} onClose={() => (syntaxOpen = false)} />
 
 <style>
   main {

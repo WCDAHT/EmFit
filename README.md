@@ -28,10 +28,12 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
 - **Fast NTFS scan** - reads the MFT directly (physical-drive mode with a
   volume-handle fallback), in parallel across drives, with live progress,
   a working Cancel, and per-drive failure isolation.
-- **Instant search** across every scanned volume: substrings, wildcards
-  (`*.pdf`, `draft*`, `n?tes`), semicolon-OR terms, backtick path scoping
-  (`` `C:\Users` report ``), a regex field, and size / date / extension
-  filters - inline (`ext:iso size:>1gb dm:2024-01-01..`) or as fields.
+- **Instant search** across every scanned volume, with a full query language:
+  `space` for AND, `|` for OR, `!` to exclude, `<>` to group, `""` for an exact
+  phrase, wildcards (`*.pdf`, `draft*`, `n?tes`), backtick path scoping
+  (`` `C:\Users` report ``), and modifiers and functions for everything else
+  (`case:`, `path:`, `ww:`, `regex:`, `ext:iso size:>1gb dm:last7days`).
+  **Search > Search syntax** lists the lot, and clicking an entry inserts it.
 - **Preset filters** in Everything's `Filters.csv` format (Audio, Video,
   Documents, ...); drop your own `Filters.csv` next to the config to replace
   them.

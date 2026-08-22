@@ -173,6 +173,18 @@ export interface PresetDto {
   search: string;
 }
 
+/** One row of the search-syntax reference. */
+export interface SyntaxEntryDto {
+  token: string;
+  summary: string;
+}
+
+/** A titled group of syntax rows. */
+export interface SyntaxSectionDto {
+  title: string;
+  entries: SyntaxEntryDto[];
+}
+
 /** One entry in the scan list: a mounted volume or a disk image file.
  *  `kind`+`key` mirror the shell's `ScanTargetDto`; `label` is display-only. */
 export interface ScanTarget {

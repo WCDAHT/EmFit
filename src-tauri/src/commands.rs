@@ -35,8 +35,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dto::{
     CacheUsageDto, DrillDto, NodeInfoDto, PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto,
-    ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto, TreeRowDto, TreemapRectDto,
-    TypeRowDto, ViewUpdatedDto, VolumeDto,
+    ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto, SyntaxSectionDto, TreeRowDto,
+    TreemapRectDto, TypeRowDto, ViewUpdatedDto, VolumeDto,
 };
 use crate::error::{CommandError, CommandResult};
 use crate::state::{AppState, Cacheable, ScannedVolume};
@@ -707,7 +707,7 @@ pub fn get_rows(state: State<'_, AppState>, offset: u64, count: u64) -> RowWindo
     // the same folding/needle semantics the matcher used.
     let query = Query::parse(&inner.view.raw);
     let highlightable =
-        !query.patterns.is_empty() || query.regex.is_some() || !query.extensions.is_empty();
+        !query.expr.is_all() || query.regex.is_some() || !query.extensions.is_empty();
 
     let count = count.min(MAX_WINDOW) as usize;
     let rows = view::build_rows(&indices, &inner.view.hits, offset as usize, count)
@@ -761,6 +761,16 @@ pub fn selection_summary(
 #[tauri::command]
 pub fn list_presets() -> Vec<PresetDto> {
     presets::load().into_iter().map(Into::into).collect()
+}
+
+/// The query language, for the Search syntax dialog. Generated from the
+/// parser's own tables, so it cannot list something the engine ignores.
+#[tauri::command]
+pub fn search_syntax() -> Vec<SyntaxSectionDto> {
+    emfit_core::service::syntax::reference()
+        .into_iter()
+        .map(Into::into)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

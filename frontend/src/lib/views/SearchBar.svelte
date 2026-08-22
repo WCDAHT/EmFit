@@ -28,6 +28,14 @@
   onMount(async () => {
     // Ctrl+F at the app root lands here (STANDARDS sec 3.7).
     hooks.focusSearch = () => searchInput?.focus();
+    // The Search syntax dialog inserts what you click, with a space between
+    // terms so the result is still a valid query.
+    hooks.insertSyntax = (text: string) => {
+      const gap = session.text === "" || session.text.endsWith(" ") ? "" : " ";
+      session.text = `${session.text}${gap}${text.trim()}`;
+      queryChanged(true);
+      searchInput?.focus();
+    };
     presets = await listPresets();
   });
 
@@ -54,7 +62,7 @@
         oninput={() => queryChanged()}
         type="text"
         spellcheck="false"
-        placeholder={"Search - try  *.pdf;*.docx   ext:iso size:>1gb   `C:\\Users` report   (Ctrl+F)"}
+        placeholder={"Search - try  *.pdf|*.docx   report !draft   size:>1gb   `C:\\Users` ww:log   (Ctrl+F)"}
         aria-label="Search"
       />
       {#if session.text}

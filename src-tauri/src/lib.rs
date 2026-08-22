@@ -66,12 +66,15 @@ pub fn run() {
                 .text("toggle_theme", "Toggle light/dark")
                 .text("settings", "Settings...")
                 .build()?;
+            let search = SubmenuBuilder::new(app, "Search")
+                .text("syntax", "Search syntax...")
+                .build()?;
             let help = SubmenuBuilder::new(app, "Help")
                 .text("shortcuts", "Keyboard shortcuts\tF1")
                 .text("about", "About EmFit")
                 .build()?;
             let menu = MenuBuilder::new(app)
-                .items(&[&file, &view, &help])
+                .items(&[&file, &view, &search, &help])
                 .build()?;
             app.set_menu(menu)?;
             Ok(())
@@ -101,6 +104,7 @@ pub fn run() {
             commands::get_rows,
             commands::selection_summary,
             commands::list_presets,
+            commands::search_syntax,
             commands::tree_roots,
             commands::tree_children,
             commands::node_lineage,

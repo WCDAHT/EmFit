@@ -130,6 +130,9 @@ export function removeTarget(key: string) {
 export const hooks: {
   focusSearch?: () => void;
   rescan?: () => void;
+  /** Append syntax to the search box - the Search syntax dialog inserts
+   *  what you click. */
+  insertSyntax?: (text: string) => void;
 } = {};
 
 // ---------------------------------------------------------------------------

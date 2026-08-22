@@ -10,6 +10,7 @@ use emfit_core::model::volume::VolumeInfo;
 use emfit_core::service::breakdown::TypeRow;
 use emfit_core::service::presets::Preset;
 use emfit_core::service::query::RawQuery;
+use emfit_core::service::syntax::SyntaxSection;
 use emfit_core::service::task::Progress;
 use emfit_core::service::tree::TreeRow;
 use emfit_core::service::treemap::TreemapRect;
@@ -293,6 +294,36 @@ impl From<Preset> for PresetDto {
         Self {
             name: p.name,
             search: p.search,
+        }
+    }
+}
+
+/// One row of the search-syntax reference (`Search > Search syntax`).
+#[derive(Serialize, Debug, Clone)]
+pub struct SyntaxEntryDto {
+    pub token: String,
+    pub summary: String,
+}
+
+/// A titled group of those rows.
+#[derive(Serialize, Debug, Clone)]
+pub struct SyntaxSectionDto {
+    pub title: String,
+    pub entries: Vec<SyntaxEntryDto>,
+}
+
+impl From<SyntaxSection> for SyntaxSectionDto {
+    fn from(s: SyntaxSection) -> Self {
+        Self {
+            title: s.title,
+            entries: s
+                .entries
+                .into_iter()
+                .map(|e| SyntaxEntryDto {
+                    token: e.token,
+                    summary: e.summary,
+                })
+                .collect(),
         }
     }
 }

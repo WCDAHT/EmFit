@@ -387,6 +387,40 @@ impl Index {
         }
         out
     }
+
+    /// [`Index::path`] into a caller-owned buffer, replacing its contents.
+    ///
+    /// The allocation-free form: a `path:` search term needs the path of every
+    /// candidate node on every keystroke, and [`Index::path`] allocates twice
+    /// per call. The ancestor names go on the stack; a chain deeper than the
+    /// bound falls back to the allocating version rather than truncating.
+    pub fn write_path(&self, id: NodeId, out: &mut String) {
+        const MAX_DEPTH: usize = 64;
+
+        let mut parts: [&str; MAX_DEPTH] = [""; MAX_DEPTH];
+        let mut depth = 0;
+        let mut cur = id;
+        while cur != self.root && depth < MAX_DEPTH {
+            parts[depth] = self.name(cur);
+            depth += 1;
+            cur = self.node(cur).parent;
+        }
+        if cur != self.root {
+            out.clear();
+            out.push_str(&self.path(id));
+            return;
+        }
+
+        let sep = self.caps.path_separator;
+        out.clear();
+        out.push_str(&self.caps.root_label);
+        for part in parts[..depth].iter().rev() {
+            if !out.is_empty() && !out.ends_with(sep) {
+                out.push(sep);
+            }
+            out.push_str(part);
+        }
+    }
 }
 
 impl std::fmt::Debug for Index {
