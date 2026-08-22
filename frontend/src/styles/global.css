@@ -113,3 +113,20 @@ button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Hover toasts (lib/tooltip.ts). One shared element parked on <body>, so it
+   is styled here rather than in any one component. */
+.tip-toast {
+  display: none;
+  position: fixed;
+  z-index: 200;
+  max-width: 300px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+  pointer-events: none;
+}

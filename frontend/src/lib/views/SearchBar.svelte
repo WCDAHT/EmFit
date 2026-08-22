@@ -20,10 +20,12 @@
   } from "../session.svelte";
   import type { PresetDto } from "../types";
   import Icon from "../components/Icon.svelte";
+  import AdvancedSearch from "../components/AdvancedSearch.svelte";
 
   let presets: PresetDto[] = $state([]);
   let searchInput: HTMLInputElement | undefined = $state();
   let presetName = $state("");
+  let advancedOpen = $state(false);
 
   onMount(async () => {
     // Ctrl+F at the app root lands here (STANDARDS sec 3.7).
@@ -171,8 +173,18 @@
         />
         <span>System files</span>
       </label>
+
+      <button
+        class="advanced"
+        title="Build a query from a form - every search option, explained"
+        onclick={() => (advancedOpen = true)}
+      >
+        Advanced...
+      </button>
     </div>
   {/if}
+
+  <AdvancedSearch open={advancedOpen} onClose={() => (advancedOpen = false)} />
 
   {#if resultLine || session.warnings.length > 0}
     <div class="meta">
@@ -319,6 +331,22 @@
   }
   .panel .check {
     cursor: pointer;
+  }
+  .advanced {
+    margin-left: auto;
+    height: 24px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-small);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: var(--font-size-body);
+    cursor: pointer;
+  }
+  .advanced:hover {
+    background: var(--surface-hover);
+    border-color: var(--selection);
   }
 
   .meta {
