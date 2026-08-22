@@ -10,6 +10,20 @@
 // what lets a user type `regex:^\d+ size:>1gb`, open the dialog, tick a box,
 // and still have their regex when they hit Search.
 
+import {
+  escapeQuotes,
+  isDate,
+  readFunction,
+  readRange,
+  readSize,
+  rangeValue,
+  sizeValue,
+  splitTerms,
+  unescapeQuotes,
+  value,
+  type SizeUnit,
+} from "./advanced-syntax";
+
 /** A text field with the three match toggles every one of them carries. */
 export interface NameField {
   text: string;
@@ -20,6 +34,35 @@ export interface NameField {
 
 function field(): NameField {
   return { text: "", matchCase: false, wholeWords: false, diacritics: false };
+}
+
+/** One date bound: kept even while switched off, so unticking a box does
+ *  not throw the date away. */
+export interface DateBound {
+  on: boolean;
+  date: string;
+}
+
+/** A date range (advanced-search.md C8). */
+export interface DateFilter {
+  from: DateBound;
+  to: DateBound;
+}
+
+function dates(): DateFilter {
+  return { from: { on: false, date: "" }, to: { on: false, date: "" } };
+}
+
+/** A size range, each end with its own unit. */
+export interface SizeFilter {
+  from: string;
+  fromUnit: SizeUnit;
+  to: string;
+  toUnit: SizeUnit;
+}
+
+function sizes(): SizeFilter {
+  return { from: "", fromUnit: "MB", to: "", toUnit: "MB" };
 }
 
 /** Where to look (advanced-search.md C7). */
@@ -37,6 +80,10 @@ export const advanced = $state({
   none: field(),
   /** Located in... (C7) */
   located: { path: "", subfolders: true } as Located,
+  /** Dates and size (C8) */
+  modified: dates(),
+  created: dates(),
+  size: sizes(),
   /** Terms no panel understands, preserved verbatim. */
   rest: "",
 });
@@ -52,12 +99,6 @@ function prefix(f: NameField): string {
 
 function words(f: NameField): string[] {
   return f.text.split(/\s+/).filter((w) => w !== "");
-}
-
-/** A value that has to survive as one term even with spaces in it. Only
- *  quoted when it needs to be - `infolder:C:\\Users` reads better bare. */
-function value(text: string): string {
-  return /[\s"]/.test(text) ? `"${escapeQuotes(text)}"` : text;
 }
 
 /** The query the dialog currently describes. */
@@ -85,8 +126,28 @@ export function buildQuery(): string {
 
   parts.push(...words(advanced.none).map((w) => `!${prefix(advanced.none)}${w}`));
 
+  push(parts, "dm", dateRange(advanced.modified));
+  push(parts, "dc", dateRange(advanced.created));
+  push(parts, "size", sizeRange(advanced.size));
+
   if (advanced.rest !== "") parts.push(advanced.rest);
   return parts.join(" ");
+}
+
+/** Add `name:value`, if there is a value. */
+function push(parts: string[], name: string, value: string | undefined) {
+  if (value !== undefined) parts.push(`${name}:${value}`);
+}
+
+function dateRange(f: DateFilter): string | undefined {
+  return rangeValue(f.from.on ? f.from.date : "", f.to.on ? f.to.date : "");
+}
+
+function sizeRange(f: SizeFilter): string | undefined {
+  return rangeValue(
+    f.from.trim() === "" ? "" : sizeValue(f.from, f.fromUnit),
+    f.to.trim() === "" ? "" : sizeValue(f.to, f.toUnit),
+  );
 }
 
 /** Fill the dialog from a query string. */
@@ -106,13 +167,16 @@ export function reset() {
   advanced.any = field();
   advanced.none = field();
   advanced.located = { path: "", subfolders: true };
+  advanced.modified = dates();
+  advanced.created = dates();
+  advanced.size = sizes();
   advanced.rest = "";
 }
 
 /** Try to read one term into a panel. False means "not mine" - the term goes
  *  back to the search box untouched. */
 function claim(term: string): boolean {
-  if (claimLocated(term)) return true;
+  if (claimLocated(term) || claimDates(term) || claimSize(term)) return true;
   if (term.startsWith("!")) return into(advanced.none, term.slice(1));
 
   if (term.startsWith("<") && term.endsWith(">")) {
@@ -147,14 +211,41 @@ function claimLocated(term: string): boolean {
   return true;
 }
 
-/** The value of a function term, or undefined when the term is not one of
- *  these functions. Quoted values come back unquoted. */
-export function readFunction(term: string, names: string[]): string | undefined {
-  const lower = term.toLowerCase();
-  const name = names.find((n) => lower.startsWith(n));
-  if (name === undefined) return undefined;
-  const raw = term.slice(name.length);
-  return raw.startsWith('"') ? unescapeQuotes(raw.replace(/^"|"$/g, "")) : raw;
+/** Date modified and date created, in the shapes the pickers write. */
+function claimDates(term: string): boolean {
+  const modified = readFunction(term, ["datemodified:", "dm:"]);
+  if (modified !== undefined) return intoDates(advanced.modified, modified);
+  const created = readFunction(term, ["datecreated:", "dc:"]);
+  if (created !== undefined) return intoDates(advanced.created, created);
+  return false;
+}
+
+function intoDates(f: DateFilter, text: string): boolean {
+  if (f.from.on || f.to.on) return false;
+  const range = readRange(text, isDate);
+  if (range === undefined) return false;
+  f.from = { on: range.from !== "", date: range.from };
+  f.to = { on: range.to !== "", date: range.to };
+  return true;
+}
+
+function claimSize(term: string): boolean {
+  const text = readFunction(term, ["size:"]);
+  if (text === undefined) return false;
+  if (advanced.size.from !== "" || advanced.size.to !== "") return false;
+
+  const range = readRange(text, (part) => readSize(part) !== undefined);
+  if (range === undefined) return false;
+  const from = range.from === "" ? undefined : readSize(range.from);
+  const to = range.to === "" ? undefined : readSize(range.to);
+
+  advanced.size = {
+    from: from?.amount ?? "",
+    fromUnit: from?.unit ?? "MB",
+    to: to?.amount ?? "",
+    toUnit: to?.unit ?? "MB",
+  };
+  return true;
 }
 
 type Toggles = Omit<NameField, "text">;
@@ -225,47 +316,4 @@ function put(f: NameField, term: string) {
   }
   const text = textOf(term);
   f.text = f.text === "" ? text : `${f.text} ${text}`;
-}
-
-/** Split a query into top-level terms, the way the Rust tokenizer does:
- *  whitespace separates, but not inside `"quotes"`, `` `backticks` ``, or
- *  `<groups>`. */
-export function splitTerms(text: string): string[] {
-  const terms: string[] = [];
-  let current = "";
-  let closer = "";
-  let depth = 0;
-
-  for (const c of text) {
-    if (closer) {
-      current += c;
-      if (c === closer) closer = "";
-      continue;
-    }
-    if (c === '"' || c === "`") {
-      closer = c;
-      current += c;
-      continue;
-    }
-    if (c === "<") depth += 1;
-    if (c === ">") depth = Math.max(0, depth - 1);
-    if (depth === 0 && /\s/.test(c)) {
-      if (current !== "") terms.push(current);
-      current = "";
-      continue;
-    }
-    current += c;
-  }
-  if (current !== "") terms.push(current);
-  return terms;
-}
-
-/** A quote inside a phrase is written with the `quot:` macro, which is what
- *  the parser expands it back to. */
-function escapeQuotes(text: string): string {
-  return text.replaceAll('"', "quot:");
-}
-
-function unescapeQuotes(text: string): string {
-  return text.replaceAll("quot:", '"');
 }

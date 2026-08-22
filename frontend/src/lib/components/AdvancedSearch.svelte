@@ -16,6 +16,7 @@
   import { tip } from "../tooltip";
   import NamesPanel from "./advanced/NamesPanel.svelte";
   import LocatedPanel from "./advanced/LocatedPanel.svelte";
+  import DatesPanel from "./advanced/DatesPanel.svelte";
 
   interface Props {
     open: boolean;
@@ -67,7 +68,8 @@
       <div class="panels">
         <NamesPanel />
         <LocatedPanel />
-        <!-- More panels land here, one per commit (advanced-search.md C8 onward). -->
+        <DatesPanel />
+        <!-- More panels land here, one per commit (advanced-search.md C9 onward). -->
 
         {#if advanced.rest !== ""}
           <section class="preserved">
