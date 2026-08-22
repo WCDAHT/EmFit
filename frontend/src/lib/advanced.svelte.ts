@@ -65,6 +65,20 @@ function sizes(): SizeFilter {
   return { from: "", fromUnit: "MB", to: "", toUnit: "MB" };
 }
 
+/** The Type dropdown (advanced-search.md C9), and the syntax each choice
+ *  writes. "No extension" has no function of its own - it is a regex for a
+ *  name with no dot in it, which is what having no extension means. */
+export const TYPES = [
+  { key: "any", label: "(All Files and Folders)", terms: [] },
+  { key: "files", label: "All File Types", terms: ["file:"] },
+  { key: "noext", label: "Files with no Extension", terms: ["file:", "regex:^[^.]+$"] },
+  { key: "folders", label: "Folders", terms: ["folder:"] },
+  { key: "empty", label: "Empty Folders", terms: ["empty:"] },
+  { key: "roots", label: "Roots", terms: ["root:"] },
+] as const;
+
+export type TypeKey = (typeof TYPES)[number]["key"];
+
 /** Where to look (advanced-search.md C7). */
 export interface Located {
   path: string;
@@ -84,6 +98,8 @@ export const advanced = $state({
   modified: dates(),
   created: dates(),
   size: sizes(),
+  /** Type (C9) */
+  type: "any" as TypeKey,
   /** Terms no panel understands, preserved verbatim. */
   rest: "",
 });
@@ -125,6 +141,8 @@ export function buildQuery(): string {
   else if (any.length > 1) parts.push(`<${any.join(" | ")}>`);
 
   parts.push(...words(advanced.none).map((w) => `!${prefix(advanced.none)}${w}`));
+
+  parts.push(...(TYPES.find((t) => t.key === advanced.type)?.terms ?? []));
 
   push(parts, "dm", dateRange(advanced.modified));
   push(parts, "dc", dateRange(advanced.created));
@@ -170,13 +188,16 @@ export function reset() {
   advanced.modified = dates();
   advanced.created = dates();
   advanced.size = sizes();
+  advanced.type = "any";
   advanced.rest = "";
 }
 
 /** Try to read one term into a panel. False means "not mine" - the term goes
  *  back to the search box untouched. */
 function claim(term: string): boolean {
-  if (claimLocated(term) || claimDates(term) || claimSize(term)) return true;
+  if (claimLocated(term) || claimType(term) || claimDates(term) || claimSize(term)) {
+    return true;
+  }
   if (term.startsWith("!")) return into(advanced.none, term.slice(1));
 
   if (term.startsWith("<") && term.endsWith(">")) {
@@ -208,6 +229,24 @@ function claimLocated(term: string): boolean {
   if (path === undefined || path.trim() === "") return false;
 
   advanced.located = { path, subfolders: inFolder === undefined };
+  return true;
+}
+
+/** The Type dropdown, recognized only in the exact terms it writes.
+ *
+ *  "No extension" is two terms, and they arrive one at a time: `file:` sets
+ *  the dropdown to All File Types, and the regex that follows upgrades it. */
+function claimType(term: string): boolean {
+  const lower = term.toLowerCase();
+  if (advanced.type === "files" && term === "regex:^[^.]+$") {
+    advanced.type = "noext";
+    return true;
+  }
+  if (advanced.type !== "any") return false;
+
+  const match = TYPES.find((t) => t.terms.length === 1 && t.terms[0] === lower);
+  if (!match) return false;
+  advanced.type = match.key;
   return true;
 }
 

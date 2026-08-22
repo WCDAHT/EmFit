@@ -40,6 +40,9 @@ export const session = $state({
   modified: "",
   extensions: "",
   preset: "",
+  /** The selected preset's name. Held beside its search string so the
+   *  toolbar dropdown and the Advanced Search dialog show the same one. */
+  presetName: "",
   includeHidden: true,
   includeSystem: true,
   caseSensitive: false,
@@ -189,6 +192,7 @@ export function clearFilters() {
   session.modified = "";
   session.extensions = "";
   session.preset = "";
+  session.presetName = "";
   session.caseSensitive = false;
   session.includeHidden = true;
   session.includeSystem = true;

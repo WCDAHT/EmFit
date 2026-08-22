@@ -24,7 +24,6 @@
 
   let presets: PresetDto[] = $state([]);
   let searchInput: HTMLInputElement | undefined = $state();
-  let presetName = $state("");
   let advancedOpen = $state(false);
 
   onMount(async () => {
@@ -42,7 +41,7 @@
   });
 
   function onPresetChange() {
-    const preset = presets.find((p) => p.name === presetName);
+    const preset = presets.find((p) => p.name === session.presetName);
     session.preset = preset?.search ?? "";
     queryChanged(true);
   }
@@ -83,7 +82,7 @@
 
     <select
       class="preset"
-      bind:value={presetName}
+      bind:value={session.presetName}
       onchange={onPresetChange}
       title="Preset filter (Filters.csv)"
       aria-label="Preset filter"
