@@ -565,6 +565,21 @@ mod tests {
     }
 
     #[test]
+    fn a_phrase_takes_its_modifiers_from_before_the_quote() {
+        let cased = Mods {
+            case: Some(true),
+            wildcards: Some(false),
+            ..Mods::default()
+        };
+        assert_eq!(
+            parse_text("case:\"annual report\"").expr,
+            Expr::Term(Term::Name(NameTerm::new("annual report", cased)))
+        );
+        // Inside the quotes it is text, not a modifier.
+        assert_eq!(parse_text("\"case:foo\"").expr, literal("case:foo"));
+    }
+
+    #[test]
     fn macros_expand_to_literal_characters() {
         assert_eq!(parse_text("quot:").expr, name("\""));
         assert_eq!(parse_text("a#38:b").expr, name("a&b"));

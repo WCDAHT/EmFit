@@ -179,9 +179,12 @@ enum Token {
     Or,
     Not,
     /// A term with its macros already expanded. `quoted` means the text was
-    /// written inside `"`, which makes it a literal name match.
+    /// written inside `"`, which makes it a literal name match; `head` is
+    /// then whatever stood before the opening quote, where the modifiers of
+    /// a phrase have to live.
     Text {
         text: String,
+        head: String,
         quoted: bool,
     },
 }
@@ -224,6 +227,7 @@ fn tokenize(text: &str) -> Vec<Token> {
 /// operators: past the colon they are part of a value.
 fn scan_term(chars: &mut Peekable<Chars>) -> Token {
     let mut raw = String::new();
+    let mut head = String::new();
     let mut quoted = false;
     let mut seen_colon = false;
 
@@ -235,7 +239,11 @@ fn scan_term(chars: &mut Peekable<Chars>) -> Token {
             ';' | '<' | '>' if !seen_colon => break,
             '"' => {
                 chars.next();
-                quoted = true;
+                if !quoted {
+                    // What came before the quote is not part of the phrase.
+                    head = std::mem::take(&mut raw);
+                    quoted = true;
+                }
                 for c in chars.by_ref() {
                     if c == '"' {
                         break;
@@ -255,6 +263,7 @@ fn scan_term(chars: &mut Peekable<Chars>) -> Token {
 
     Token::Text {
         text: expand_macros(&raw),
+        head,
         quoted,
     }
 }
@@ -380,33 +389,42 @@ impl Parser<'_> {
                 }
                 Some(inner)
             }
-            Token::Text { text, quoted } => {
-                let (text, quoted) = (text.clone(), *quoted);
+            Token::Text { text, head, quoted } => {
+                let (text, head, quoted) = (text.clone(), head.clone(), *quoted);
                 self.at += 1;
-                Some(self.term(&text, quoted))
+                Some(self.term(&text, &head, quoted))
             }
         }
     }
 
     /// One term's text -> the thing it filters on.
-    fn term(&mut self, text: &str, quoted: bool) -> Expr {
-        if text.is_empty() {
+    fn term(&mut self, text: &str, head: &str, quoted: bool) -> Expr {
+        if text.is_empty() && !quoted {
             return Expr::All;
         }
-        // A quoted phrase is literal: wildcards inside it are just characters.
-        if quoted {
-            let mut mods = self.mods;
-            mods.wildcards = Some(false);
-            return Expr::Term(Term::Name(NameTerm::new(text, mods)));
-        }
 
-        // Modifier prefixes stack: `case:wfn:report` is both.
+        // Modifier prefixes stack: `case:wfn:report` is both. A phrase takes
+        // them from the text before its opening quote, so `case:"annual
+        // report"` is a cased phrase while `"case:foo"` stays literal.
         let mut mods = self.mods;
-        let mut rest = text;
+        let mut rest = if quoted { head } else { text };
         while let Some((modifier, on, tail)) = strip_modifier(rest) {
             modifier.apply(on, &mut mods);
             rest = tail;
         }
+
+        // A quoted phrase is literal: wildcards inside it are just characters.
+        if quoted {
+            mods.wildcards = Some(false);
+            // Anything left of the quote that was not a modifier belongs to
+            // the phrase - `re"port"` is one word.
+            let phrase = format!("{rest}{text}");
+            return match phrase.is_empty() {
+                true => Expr::All,
+                false => Expr::Term(Term::Name(NameTerm::new(&phrase, mods))),
+            };
+        }
+
         if rest.is_empty() {
             // A bare modifier: it governs the rest of this group instead.
             self.mods = mods;
