@@ -14,7 +14,8 @@
   import { advanced, buildQuery, load, reset } from "../advanced.svelte";
   import { queryChanged, session } from "../session.svelte";
   import { tip } from "../tooltip";
-  import NamesPanel from "./NamesPanel.svelte";
+  import NamesPanel from "./advanced/NamesPanel.svelte";
+  import LocatedPanel from "./advanced/LocatedPanel.svelte";
 
   interface Props {
     open: boolean;
@@ -65,7 +66,8 @@
 
       <div class="panels">
         <NamesPanel />
-        <!-- More panels land here, one per commit (advanced-search.md C7 onward). -->
+        <LocatedPanel />
+        <!-- More panels land here, one per commit (advanced-search.md C8 onward). -->
 
         {#if advanced.rest !== ""}
           <section class="preserved">

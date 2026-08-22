@@ -413,11 +413,16 @@ impl Parser<'_> {
             rest = tail;
         }
 
-        // A quoted phrase is literal: wildcards inside it are just characters.
         if quoted {
+            // `infolder:"C:\Program Files"` - quotes carry a function value
+            // that contains spaces, which nothing else in the grammar can.
+            if rest.ends_with(':') {
+                return self.function(&format!("{rest}{text}"), mods);
+            }
+            // Otherwise it is a literal phrase: wildcards inside it are just
+            // characters, and anything left of the quote that was not a
+            // modifier belongs to the phrase - `re"port"` is one word.
             mods.wildcards = Some(false);
-            // Anything left of the quote that was not a modifier belongs to
-            // the phrase - `re"port"` is one word.
             let phrase = format!("{rest}{text}");
             return match phrase.is_empty() {
                 true => Expr::All,
@@ -431,6 +436,12 @@ impl Parser<'_> {
             return Expr::All;
         }
 
+        self.function(rest, mods)
+    }
+
+    /// A term with its modifiers already peeled: a function if it names one,
+    /// otherwise a name search.
+    fn function(&mut self, rest: &str, mods: Mods) -> Expr {
         if let Some(kind) = category(rest) {
             return Expr::Term(Term::Category(kind));
         }

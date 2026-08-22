@@ -22,13 +22,21 @@ function field(): NameField {
   return { text: "", matchCase: false, wholeWords: false, diacritics: false };
 }
 
+/** Where to look (advanced-search.md C7). */
+export interface Located {
+  path: string;
+  subfolders: boolean;
+}
+
 /** Everything the dialog holds. Panels add their fields here as they land. */
 export const advanced = $state({
-  /** File names containing... (advanced-search.md C6) */
+  /** File names containing... (C6) */
   all: field(),
   phrase: field(),
   any: field(),
   none: field(),
+  /** Located in... (C7) */
+  located: { path: "", subfolders: true } as Located,
   /** Terms no panel understands, preserved verbatim. */
   rest: "",
 });
@@ -46,9 +54,22 @@ function words(f: NameField): string[] {
   return f.text.split(/\s+/).filter((w) => w !== "");
 }
 
+/** A value that has to survive as one term even with spaces in it. Only
+ *  quoted when it needs to be - `infolder:C:\\Users` reads better bare. */
+function value(text: string): string {
+  return /[\s"]/.test(text) ? `"${escapeQuotes(text)}"` : text;
+}
+
 /** The query the dialog currently describes. */
 export function buildQuery(): string {
   const parts: string[] = [];
+
+  // The scope goes first: it is the one part of a query people read as a
+  // heading rather than a condition.
+  const path = advanced.located.path.trim().replace(/[\\/]+$/, "");
+  if (path !== "") {
+    parts.push(advanced.located.subfolders ? `\`${path}\`` : `infolder:${value(path)}`);
+  }
 
   // Space is AND, so every word is simply its own term.
   parts.push(...words(advanced.all).map((w) => prefix(advanced.all) + w));
@@ -84,12 +105,14 @@ export function reset() {
   advanced.phrase = field();
   advanced.any = field();
   advanced.none = field();
+  advanced.located = { path: "", subfolders: true };
   advanced.rest = "";
 }
 
 /** Try to read one term into a panel. False means "not mine" - the term goes
  *  back to the search box untouched. */
 function claim(term: string): boolean {
+  if (claimLocated(term)) return true;
   if (term.startsWith("!")) return into(advanced.none, term.slice(1));
 
   if (term.startsWith("<") && term.endsWith(">")) {
@@ -109,6 +132,29 @@ function claim(term: string): boolean {
 
   if (strip(term).body.startsWith('"')) return into(advanced.phrase, term);
   return into(advanced.all, term);
+}
+
+/** Located in: a backtick scope searches subfolders, `infolder:` does not.
+ *  Only the first one is taken; a second scope is left in the search box. */
+function claimLocated(term: string): boolean {
+  if (advanced.located.path !== "") return false;
+
+  const inFolder = readFunction(term, ["infolder:", "parent:"]);
+  const path = term.startsWith("`") ? term.replace(/^`|`$/g, "") : inFolder;
+  if (path === undefined || path.trim() === "") return false;
+
+  advanced.located = { path, subfolders: inFolder === undefined };
+  return true;
+}
+
+/** The value of a function term, or undefined when the term is not one of
+ *  these functions. Quoted values come back unquoted. */
+export function readFunction(term: string, names: string[]): string | undefined {
+  const lower = term.toLowerCase();
+  const name = names.find((n) => lower.startsWith(n));
+  if (name === undefined) return undefined;
+  const raw = term.slice(name.length);
+  return raw.startsWith('"') ? unescapeQuotes(raw.replace(/^"|"$/g, "")) : raw;
 }
 
 type Toggles = Omit<NameField, "text">;

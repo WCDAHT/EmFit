@@ -580,6 +580,24 @@ mod tests {
     }
 
     #[test]
+    fn quotes_carry_a_function_value_with_spaces() {
+        assert_eq!(
+            parse_text("infolder:\"C:\\Program Files\"").expr,
+            Expr::Term(Term::InFolder("C:\\Program Files".to_string()))
+        );
+        // The modifiers before it still apply to the value.
+        let q = parse_text("case:child:\"annual report\"");
+        let Expr::Term(Term::Child(term)) = &q.expr else {
+            panic!("expected a child term, got {:?}", q.expr);
+        };
+        assert_eq!(
+            term.pattern,
+            Pattern::Substring("annual report".to_string())
+        );
+        assert_eq!(term.mods.case, Some(true));
+    }
+
+    #[test]
     fn macros_expand_to_literal_characters() {
         assert_eq!(parse_text("quot:").expr, name("\""));
         assert_eq!(parse_text("a#38:b").expr, name("a&b"));

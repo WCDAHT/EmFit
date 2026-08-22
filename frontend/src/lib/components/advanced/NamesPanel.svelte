@@ -8,8 +8,8 @@
   the dialog teaches the language it is a front end for.
 -->
 <script lang="ts">
-  import { advanced, type NameField } from "../advanced.svelte";
-  import { tip } from "../tooltip";
+  import { advanced, type NameField } from "../../advanced.svelte";
+  import { tip } from "../../tooltip";
 
   const TOGGLES: { key: keyof Omit<NameField, "text">; label: string; hint: string }[] = [
     {
