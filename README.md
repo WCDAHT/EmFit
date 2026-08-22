@@ -34,6 +34,10 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
   (`` `C:\Users` report ``), and modifiers and functions for everything else
   (`case:`, `path:`, `ww:`, `regex:`, `ext:iso size:>1gb dm:last7days`).
   **Search > Search syntax** lists the lot, and clicking an entry inserts it.
+- **Advanced search** - a form over that language, reached from the filters
+  menu: names, folder, dates, size, type, extension, attributes, regex,
+  lengths, and what a folder holds. Every control says which syntax it writes,
+  and anything it cannot express is carried through untouched.
 - **Preset filters** in Everything's `Filters.csv` format (Audio, Video,
   Documents, ...); drop your own `Filters.csv` next to the config to replace
   them.

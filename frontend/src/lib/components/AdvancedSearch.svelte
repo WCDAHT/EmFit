@@ -11,7 +11,7 @@
     the dialog on a hand-written query and pressing Search never loses it.
 -->
 <script lang="ts">
-  import { advanced, buildQuery, load, reset } from "../advanced.svelte";
+  import { buildQuery, load, reset } from "../advanced.svelte";
   import { queryChanged, session } from "../session.svelte";
   import { tip } from "../tooltip";
   import NamesPanel from "./advanced/NamesPanel.svelte";
@@ -21,6 +21,7 @@
   import ExtensionPanel from "./advanced/ExtensionPanel.svelte";
   import PatternPanel from "./advanced/PatternPanel.svelte";
   import FolderPanel from "./advanced/FolderPanel.svelte";
+  import ExtraPanel from "./advanced/ExtraPanel.svelte";
 
   interface Props {
     open: boolean;
@@ -77,16 +78,7 @@
         <ExtensionPanel />
         <PatternPanel />
         <FolderPanel />
-        <!-- More panels land here, one per commit (advanced-search.md C13). -->
-
-        {#if advanced.rest !== ""}
-          <section class="preserved">
-            <h3>Kept from the search box</h3>
-            <p use:tip={"Terms this dialog has no control for. They are carried through unchanged."}>
-              {advanced.rest}
-            </p>
-          </section>
-        {/if}
+        <ExtraPanel />
       </div>
 
       <footer>
@@ -170,25 +162,6 @@
     gap: var(--space-4);
     overflow-y: auto;
     padding-right: var(--space-2);
-  }
-
-  .preserved h3 {
-    margin: 0 0 var(--space-2);
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-primary);
-  }
-  .preserved p {
-    margin: 0;
-    padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-small);
-    background: var(--surface-sunken);
-    color: var(--text-secondary);
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-caption);
-    overflow-x: auto;
-    white-space: nowrap;
   }
 
   footer {
