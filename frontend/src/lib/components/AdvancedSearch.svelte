@@ -19,6 +19,7 @@
   import DatesPanel from "./advanced/DatesPanel.svelte";
   import FilterTypePanel from "./advanced/FilterTypePanel.svelte";
   import ExtensionPanel from "./advanced/ExtensionPanel.svelte";
+  import PatternPanel from "./advanced/PatternPanel.svelte";
 
   interface Props {
     open: boolean;
@@ -73,7 +74,8 @@
         <DatesPanel />
         <FilterTypePanel />
         <ExtensionPanel />
-        <!-- More panels land here, one per commit (advanced-search.md C11 onward). -->
+        <PatternPanel />
+        <!-- More panels land here, one per commit (advanced-search.md C12 onward). -->
 
         {#if advanced.rest !== ""}
           <section class="preserved">

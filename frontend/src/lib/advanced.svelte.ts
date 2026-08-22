@@ -12,6 +12,7 @@
 
 import {
   escapeQuotes,
+  isCount,
   isDate,
   readFunction,
   readRange,
@@ -103,6 +104,16 @@ function attributes(): Record<string, boolean> {
   return {};
 }
 
+/** Name length, and folder depth (advanced-search.md C11). */
+export interface CountFilter {
+  from: string;
+  to: string;
+}
+
+function counts(): CountFilter {
+  return { from: "", to: "" };
+}
+
 /** Where to look (advanced-search.md C7). */
 export interface Located {
   path: string;
@@ -127,6 +138,11 @@ export const advanced = $state({
   /** Extension and attributes (C10) */
   extensions: "",
   attributes: attributes(),
+  /** Regex, name length, folder depth (C11) */
+  regex: { text: "", matchCase: false },
+  length: counts(),
+  lengthOnPath: false,
+  depth: counts(),
   /** Terms no panel understands, preserved verbatim. */
   rest: "",
 });
@@ -179,6 +195,16 @@ export function buildQuery(): string {
     .join("");
   if (flags !== "") push(parts, "attrib", flags);
 
+  const pattern = advanced.regex.text.trim();
+  if (pattern !== "") {
+    parts.push(`${advanced.regex.matchCase ? "case:" : ""}regex:${value(pattern)}`);
+  }
+
+  const length = rangeValue(advanced.length.from.trim(), advanced.length.to.trim());
+  if (length !== undefined) parts.push(`${advanced.lengthOnPath ? "path:" : ""}len:${length}`);
+
+  push(parts, "parents", rangeValue(advanced.depth.from.trim(), advanced.depth.to.trim()));
+
   push(parts, "dm", dateRange(advanced.modified));
   push(parts, "dc", dateRange(advanced.created));
   push(parts, "size", sizeRange(advanced.size));
@@ -226,6 +252,10 @@ export function reset() {
   advanced.type = "any";
   advanced.extensions = "";
   advanced.attributes = attributes();
+  advanced.regex = { text: "", matchCase: false };
+  advanced.length = counts();
+  advanced.lengthOnPath = false;
+  advanced.depth = counts();
   advanced.rest = "";
 }
 
@@ -238,7 +268,8 @@ function claim(term: string): boolean {
     claimDates(term) ||
     claimSize(term) ||
     claimExtensions(term) ||
-    claimAttributes(term)
+    claimAttributes(term) ||
+    claimPattern(term)
   ) {
     return true;
   }
@@ -291,6 +322,36 @@ function claimType(term: string): boolean {
   const match = TYPES.find((t) => t.terms.length === 1 && t.terms[0] === lower);
   if (!match) return false;
   advanced.type = match.key;
+  return true;
+}
+
+/** The regex, name length, and folder depth fields. Each is recognized only
+ *  in the shape this dialog writes it. */
+function claimPattern(term: string): boolean {
+  const cased = /^case:/i.test(term);
+  const pattern = readFunction(cased ? term.slice(5) : term, ["regex:"]);
+  if (pattern !== undefined && pattern !== "" && advanced.regex.text === "") {
+    advanced.regex = { text: pattern, matchCase: cased };
+    return true;
+  }
+
+  const onPath = /^path:/i.test(term);
+  const length = readFunction(onPath ? term.slice(5) : term, ["len:"]);
+  if (length !== undefined && intoCounts(advanced.length, length)) {
+    advanced.lengthOnPath = onPath;
+    return true;
+  }
+
+  const depth = readFunction(term, ["parents:"]);
+  return depth !== undefined && intoCounts(advanced.depth, depth);
+}
+
+function intoCounts(f: CountFilter, text: string): boolean {
+  if (f.from !== "" || f.to !== "") return false;
+  const range = readRange(text, isCount);
+  if (range === undefined) return false;
+  f.from = range.from;
+  f.to = range.to;
   return true;
 }
 
