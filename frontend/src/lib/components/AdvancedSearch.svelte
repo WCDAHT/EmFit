@@ -18,6 +18,7 @@
   import LocatedPanel from "./advanced/LocatedPanel.svelte";
   import DatesPanel from "./advanced/DatesPanel.svelte";
   import FilterTypePanel from "./advanced/FilterTypePanel.svelte";
+  import ExtensionPanel from "./advanced/ExtensionPanel.svelte";
 
   interface Props {
     open: boolean;
@@ -71,7 +72,8 @@
         <LocatedPanel />
         <DatesPanel />
         <FilterTypePanel />
-        <!-- More panels land here, one per commit (advanced-search.md C10 onward). -->
+        <ExtensionPanel />
+        <!-- More panels land here, one per commit (advanced-search.md C11 onward). -->
 
         {#if advanced.rest !== ""}
           <section class="preserved">

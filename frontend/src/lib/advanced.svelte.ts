@@ -79,6 +79,30 @@ export const TYPES = [
 
 export type TypeKey = (typeof TYPES)[number]["key"];
 
+/** The attribute checklist (advanced-search.md C10), in the order Everything
+ *  shows it. `recorded` is false for the bits EmFit's index has no room for;
+ *  those render disabled rather than filtering on nothing. */
+export const ATTRIBUTES = [
+  { letter: "A", label: "Archive", recorded: false },
+  { letter: "C", label: "Compressed", recorded: true },
+  { letter: "V", label: "Device", recorded: false },
+  { letter: "D", label: "Directory", recorded: true },
+  { letter: "E", label: "Encrypted", recorded: false },
+  { letter: "H", label: "Hidden", recorded: true },
+  { letter: "N", label: "Normal", recorded: false },
+  { letter: "I", label: "Not Content Indexed", recorded: false },
+  { letter: "O", label: "Offline", recorded: false },
+  { letter: "R", label: "Read Only", recorded: false },
+  { letter: "L", label: "Reparse Point", recorded: true },
+  { letter: "P", label: "Sparse File", recorded: true },
+  { letter: "S", label: "System", recorded: true },
+  { letter: "T", label: "Temporary", recorded: false },
+] as const;
+
+function attributes(): Record<string, boolean> {
+  return {};
+}
+
 /** Where to look (advanced-search.md C7). */
 export interface Located {
   path: string;
@@ -100,6 +124,9 @@ export const advanced = $state({
   size: sizes(),
   /** Type (C9) */
   type: "any" as TypeKey,
+  /** Extension and attributes (C10) */
+  extensions: "",
+  attributes: attributes(),
   /** Terms no panel understands, preserved verbatim. */
   rest: "",
 });
@@ -143,6 +170,14 @@ export function buildQuery(): string {
   parts.push(...words(advanced.none).map((w) => `!${prefix(advanced.none)}${w}`));
 
   parts.push(...(TYPES.find((t) => t.key === advanced.type)?.terms ?? []));
+
+  const extensions = advanced.extensions.trim().replace(/^;+|;+$/g, "");
+  if (extensions !== "") push(parts, "ext", value(extensions));
+
+  const flags = ATTRIBUTES.filter((a) => a.recorded && advanced.attributes[a.letter])
+    .map((a) => a.letter)
+    .join("");
+  if (flags !== "") push(parts, "attrib", flags);
 
   push(parts, "dm", dateRange(advanced.modified));
   push(parts, "dc", dateRange(advanced.created));
@@ -189,13 +224,22 @@ export function reset() {
   advanced.created = dates();
   advanced.size = sizes();
   advanced.type = "any";
+  advanced.extensions = "";
+  advanced.attributes = attributes();
   advanced.rest = "";
 }
 
 /** Try to read one term into a panel. False means "not mine" - the term goes
  *  back to the search box untouched. */
 function claim(term: string): boolean {
-  if (claimLocated(term) || claimType(term) || claimDates(term) || claimSize(term)) {
+  if (
+    claimLocated(term) ||
+    claimType(term) ||
+    claimDates(term) ||
+    claimSize(term) ||
+    claimExtensions(term) ||
+    claimAttributes(term)
+  ) {
     return true;
   }
   if (term.startsWith("!")) return into(advanced.none, term.slice(1));
@@ -247,6 +291,26 @@ function claimType(term: string): boolean {
   const match = TYPES.find((t) => t.terms.length === 1 && t.terms[0] === lower);
   if (!match) return false;
   advanced.type = match.key;
+  return true;
+}
+
+function claimExtensions(term: string): boolean {
+  const list = readFunction(term, ["ext:"]);
+  if (list === undefined || list === "" || advanced.extensions !== "") return false;
+  advanced.extensions = list;
+  return true;
+}
+
+/** `attrib:HS`. Letters with no checkbox - the ones EmFit does not record -
+ *  leave the whole term in the search box, where it still filters. */
+function claimAttributes(term: string): boolean {
+  const flags = readFunction(term, ["attributes:", "attrib:"]);
+  if (flags === undefined || flags === "") return false;
+
+  const letters = [...flags.toUpperCase()];
+  const known = letters.every((c) => ATTRIBUTES.some((a) => a.recorded && a.letter === c));
+  if (!known) return false;
+  letters.forEach((c) => (advanced.attributes[c] = true));
   return true;
 }
 
