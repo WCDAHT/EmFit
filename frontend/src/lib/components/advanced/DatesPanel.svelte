@@ -1,38 +1,29 @@
 <!--
   DatesPanel.svelte - dates and size (advanced-search.md C8).
 
-  Two of the five rows in Everything's dialog have nothing behind them here:
-  EmFit does not keep a date accessed, and has no notion of a "recently
-  changed" date at all. They are rendered disabled and say why, rather than
-  being left out (a missing row reads as an oversight) or left enabled (a
-  control that quietly does nothing is worse than one that admits it).
+  Everything's dialog has two more rows here, Date last accessed and Date
+  recently changed. EmFit's scanner keeps neither, so they are not offered:
+  a control that cannot do anything has no business taking up the space.
 -->
 <script lang="ts">
   import { advanced, type DateFilter } from "../../advanced.svelte";
   import { SIZE_UNITS } from "../../advanced-syntax";
   import { tip } from "../../tooltip";
-
-  const UNRECORDED =
-    "EmFit does not record this, so there is nothing to search. It would need a change to the scanner.";
 </script>
 
-{#snippet dateRow(label: string, filter: DateFilter | undefined, hint: string)}
+{#snippet dateRow(label: string, filter: DateFilter, hint: string)}
   <div class="row">
     <span class="label">{label}</span>
     <div class="bounds" use:tip={hint}>
       <input
         type="checkbox"
-        checked={filter?.from.on ?? false}
-        disabled={!filter}
-        onchange={(e) => filter && (filter.from.on = e.currentTarget.checked)}
+        bind:checked={filter.from.on}
         aria-label={`${label} from, on`}
       />
       <input
         type="date"
-        value={filter?.from.date ?? ""}
-        disabled={!filter}
+        value={filter.from.date}
         onchange={(e) => {
-          if (!filter) return;
           filter.from.date = e.currentTarget.value;
           filter.from.on = e.currentTarget.value !== "";
         }}
@@ -41,17 +32,13 @@
       <span class="to">to</span>
       <input
         type="checkbox"
-        checked={filter?.to.on ?? false}
-        disabled={!filter}
-        onchange={(e) => filter && (filter.to.on = e.currentTarget.checked)}
+        bind:checked={filter.to.on}
         aria-label={`${label} to, on`}
       />
       <input
         type="date"
-        value={filter?.to.date ?? ""}
-        disabled={!filter}
+        value={filter.to.date}
         onchange={(e) => {
-          if (!filter) return;
           filter.to.date = e.currentTarget.value;
           filter.to.on = e.currentTarget.value !== "";
         }}
@@ -103,8 +90,6 @@
     advanced.created,
     "When the file was created. Writes: dc:2024-01-01..2024-06-30",
   )}
-  {@render dateRow("Date last accessed:", undefined, UNRECORDED)}
-  {@render dateRow("Date recently changed:", undefined, UNRECORDED)}
 </section>
 
 <style>

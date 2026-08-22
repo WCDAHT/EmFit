@@ -80,24 +80,18 @@ export const TYPES = [
 
 export type TypeKey = (typeof TYPES)[number]["key"];
 
-/** The attribute checklist (advanced-search.md C10), in the order Everything
- *  shows it. `recorded` is false for the bits EmFit's index has no room for;
- *  those render disabled rather than filtering on nothing. */
+/** The attribute checklist (advanced-search.md C10): the bits the scanner
+ *  actually keeps, in label order. Everything offers eight more - Archive,
+ *  Device, Encrypted, Normal, Not Content Indexed, Offline, Read Only,
+ *  Temporary - which EmFit does not record, so there is no box for them.
+ *  Typing `attrib:R` still warns and says why. */
 export const ATTRIBUTES = [
-  { letter: "A", label: "Archive", recorded: false },
-  { letter: "C", label: "Compressed", recorded: true },
-  { letter: "V", label: "Device", recorded: false },
-  { letter: "D", label: "Directory", recorded: true },
-  { letter: "E", label: "Encrypted", recorded: false },
-  { letter: "H", label: "Hidden", recorded: true },
-  { letter: "N", label: "Normal", recorded: false },
-  { letter: "I", label: "Not Content Indexed", recorded: false },
-  { letter: "O", label: "Offline", recorded: false },
-  { letter: "R", label: "Read Only", recorded: false },
-  { letter: "L", label: "Reparse Point", recorded: true },
-  { letter: "P", label: "Sparse File", recorded: true },
-  { letter: "S", label: "System", recorded: true },
-  { letter: "T", label: "Temporary", recorded: false },
+  { letter: "C", label: "Compressed" },
+  { letter: "D", label: "Directory" },
+  { letter: "H", label: "Hidden" },
+  { letter: "L", label: "Reparse Point" },
+  { letter: "P", label: "Sparse File" },
+  { letter: "S", label: "System" },
 ] as const;
 
 function attributes(): Record<string, boolean> {
@@ -195,7 +189,7 @@ export function buildQuery(): string {
   const extensions = advanced.extensions.trim().replace(/^;+|;+$/g, "");
   if (extensions !== "") push(parts, "ext", value(extensions));
 
-  const flags = ATTRIBUTES.filter((a) => a.recorded && advanced.attributes[a.letter])
+  const flags = ATTRIBUTES.filter((a) => advanced.attributes[a.letter])
     .map((a) => a.letter)
     .join("");
   if (flags !== "") push(parts, "attrib", flags);
@@ -410,7 +404,7 @@ function claimAttributes(term: string): boolean {
   if (flags === undefined || flags === "") return false;
 
   const letters = [...flags.toUpperCase()];
-  const known = letters.every((c) => ATTRIBUTES.some((a) => a.recorded && a.letter === c));
+  const known = letters.every((c) => ATTRIBUTES.some((a) => a.letter === c));
   if (!known) return false;
   letters.forEach((c) => (advanced.attributes[c] = true));
   return true;

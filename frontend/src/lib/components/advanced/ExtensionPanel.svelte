@@ -1,11 +1,11 @@
 <!--
   ExtensionPanel.svelte - extension and attributes (advanced-search.md C10).
 
-  Everything's dialog offers Match case and Match diacritics beside the
-  extension box. EmFit's `ext:` list compares under the volume's own rule and
-  has nowhere to put a per-term override, so those two are disabled and say
-  so - eight of the fourteen attributes are disabled for the same kind of
-  reason, and for the same reason are shown rather than hidden.
+  Everything's dialog also has Match case and Match diacritics beside the
+  extension box, and fourteen attributes rather than six. An extension list
+  compares under the volume's own rule with no room for a per-term override,
+  and the other eight attribute bits are not in the index, so neither is
+  offered here.
 -->
 <script lang="ts">
   import { advanced, ATTRIBUTES } from "../../advanced.svelte";
@@ -23,34 +23,12 @@
       aria-label="Extension"
     />
   </div>
-  <div class="row">
-    <span class="label"></span>
-    <div class="toggles">
-      <label use:tip={"Extensions compare the way the volume itself does, so this cannot be set per search."}>
-        <input type="checkbox" disabled />
-        <span>Match case</span>
-      </label>
-      <label use:tip={"Extensions compare the way the volume itself does, so this cannot be set per search."}>
-        <input type="checkbox" disabled />
-        <span>Match diacritics</span>
-      </label>
-    </div>
-  </div>
-
   <h3>Attributes:</h3>
   <ul class="attributes">
     {#each ATTRIBUTES as a (a.letter)}
       <li>
-        <label
-          use:tip={a.recorded
-            ? `Only entries with the ${a.label} bit set. Writes: attrib:${a.letter}`
-            : `EmFit does not record ${a.label}, so there is nothing to filter on.`}
-        >
-          <input
-            type="checkbox"
-            bind:checked={advanced.attributes[a.letter]}
-            disabled={!a.recorded}
-          />
+        <label use:tip={`Only entries with the ${a.label} bit set. Writes: attrib:${a.letter}`}>
+          <input type="checkbox" bind:checked={advanced.attributes[a.letter]} />
           <span>{a.label}</span>
         </label>
       </li>
@@ -100,11 +78,6 @@
     color: var(--text-primary);
   }
 
-  .toggles {
-    display: flex;
-    gap: var(--space-4);
-  }
-
   .attributes {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -121,9 +94,5 @@
     color: var(--text-secondary);
     font-size: var(--font-size-caption);
     cursor: pointer;
-  }
-  label:has(input:disabled) {
-    cursor: default;
-    color: var(--text-muted);
   }
 </style>
