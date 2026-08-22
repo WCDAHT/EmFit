@@ -138,6 +138,11 @@ export const advanced = $state({
   /** Extension and attributes (C10) */
   extensions: "",
   attributes: attributes(),
+  /** What a folder holds (C12) */
+  child: field(),
+  childCount: counts(),
+  childFileCount: counts(),
+  childFolderCount: counts(),
   /** Regex, name length, folder depth (C11) */
   regex: { text: "", matchCase: false },
   length: counts(),
@@ -195,6 +200,13 @@ export function buildQuery(): string {
     .join("");
   if (flags !== "") push(parts, "attrib", flags);
 
+  const child = advanced.child.text.trim();
+  if (child !== "") parts.push(`${prefix(advanced.child)}child:${value(child)}`);
+
+  push(parts, "childcount", countRange(advanced.childCount));
+  push(parts, "childfilecount", countRange(advanced.childFileCount));
+  push(parts, "childfoldercount", countRange(advanced.childFolderCount));
+
   const pattern = advanced.regex.text.trim();
   if (pattern !== "") {
     parts.push(`${advanced.regex.matchCase ? "case:" : ""}regex:${value(pattern)}`);
@@ -216,6 +228,10 @@ export function buildQuery(): string {
 /** Add `name:value`, if there is a value. */
 function push(parts: string[], name: string, value: string | undefined) {
   if (value !== undefined) parts.push(`${name}:${value}`);
+}
+
+function countRange(f: CountFilter): string | undefined {
+  return rangeValue(f.from.trim(), f.to.trim());
 }
 
 function dateRange(f: DateFilter): string | undefined {
@@ -252,6 +268,10 @@ export function reset() {
   advanced.type = "any";
   advanced.extensions = "";
   advanced.attributes = attributes();
+  advanced.child = field();
+  advanced.childCount = counts();
+  advanced.childFileCount = counts();
+  advanced.childFolderCount = counts();
   advanced.regex = { text: "", matchCase: false };
   advanced.length = counts();
   advanced.lengthOnPath = false;
@@ -269,7 +289,8 @@ function claim(term: string): boolean {
     claimSize(term) ||
     claimExtensions(term) ||
     claimAttributes(term) ||
-    claimPattern(term)
+    claimPattern(term) ||
+    claimFolder(term)
   ) {
     return true;
   }
@@ -322,6 +343,26 @@ function claimType(term: string): boolean {
   const match = TYPES.find((t) => t.terms.length === 1 && t.terms[0] === lower);
   if (!match) return false;
   advanced.type = match.key;
+  return true;
+}
+
+/** What a folder holds: a matching child, or a count of them. */
+function claimFolder(term: string): boolean {
+  const counts: [string, CountFilter][] = [
+    ["childcount:", advanced.childCount],
+    ["childfilecount:", advanced.childFileCount],
+    ["childfoldercount:", advanced.childFolderCount],
+  ];
+  for (const [name, filter] of counts) {
+    const text = readFunction(term, [name]);
+    if (text !== undefined) return intoCounts(filter, text);
+  }
+
+  // `child:` takes the same match toggles a name field does.
+  const { mods, body } = strip(term);
+  const name = readFunction(body, ["child:"]);
+  if (name === undefined || name === "" || advanced.child.text !== "") return false;
+  advanced.child = { text: name, ...mods };
   return true;
 }
 

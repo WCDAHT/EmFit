@@ -20,6 +20,7 @@
   import FilterTypePanel from "./advanced/FilterTypePanel.svelte";
   import ExtensionPanel from "./advanced/ExtensionPanel.svelte";
   import PatternPanel from "./advanced/PatternPanel.svelte";
+  import FolderPanel from "./advanced/FolderPanel.svelte";
 
   interface Props {
     open: boolean;
@@ -75,7 +76,8 @@
         <FilterTypePanel />
         <ExtensionPanel />
         <PatternPanel />
-        <!-- More panels land here, one per commit (advanced-search.md C12 onward). -->
+        <FolderPanel />
+        <!-- More panels land here, one per commit (advanced-search.md C13). -->
 
         {#if advanced.rest !== ""}
           <section class="preserved">
