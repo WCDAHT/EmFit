@@ -201,8 +201,24 @@ pub fn sort_by_ranks(hits: &mut [Hit], ranks: &SortRanks, ascending: bool) {
 
 /// The size a user expects to see beside a row: files show their own bytes,
 /// directories their subtree total.
-fn effective_size(indices: &[&Index], (vol, id): Hit) -> u64 {
-    let node = indices[vol as usize].node(id);
+/// The index a hit belongs to, if that volume is still loaded and still has
+/// that node.
+///
+/// A hit is only meaningful against the volume set that produced it, and
+/// scanning replaces that set. Every path that resolves one therefore asks
+/// rather than indexing: the release profile builds with `panic = "abort"`, so
+/// an out-of-bounds here is not a caught error but the process vanishing
+/// mid-click with nothing written to the log.
+fn resolve<'a>(indices: &'a [&Index], (vol, id): Hit) -> Option<&'a Index> {
+    let index = *indices.get(vol as usize)?;
+    (id.index() < index.len()).then_some(index)
+}
+
+fn effective_size(indices: &[&Index], hit: Hit) -> u64 {
+    let Some(index) = resolve(indices, hit) else {
+        return 0;
+    };
+    let node = index.node(hit.1);
     if node.is_directory() {
         node.total_size()
     } else {
@@ -210,8 +226,11 @@ fn effective_size(indices: &[&Index], (vol, id): Hit) -> u64 {
     }
 }
 
-fn effective_allocated(indices: &[&Index], (vol, id): Hit) -> u64 {
-    let node = indices[vol as usize].node(id);
+fn effective_allocated(indices: &[&Index], hit: Hit) -> u64 {
+    let Some(index) = resolve(indices, hit) else {
+        return 0;
+    };
+    let node = index.node(hit.1);
     if node.is_directory() {
         node.total_allocated()
     } else {
@@ -252,8 +271,11 @@ pub fn build_rows(indices: &[&Index], hits: &[Hit], offset: usize, count: usize)
 
     window
         .iter()
-        .map(|&(vol, id)| {
-            let index = indices[vol as usize];
+        .filter_map(|&(vol, id)| {
+            // A hit left over from a volume set that has been replaced. It
+            // will be gone as soon as the new query finishes; until then it is
+            // one row missing from a window, not a dead process.
+            let index = resolve(indices, (vol, id))?;
             let node = index.node(id);
             let flags = node.flags();
             let name = index.name(id).to_string();
@@ -261,7 +283,7 @@ pub fn build_rows(indices: &[&Index], hits: &[Hit], offset: usize, count: usize)
             let size = effective_size(indices, (vol, id));
             let allocated = effective_allocated(indices, (vol, id));
 
-            Row {
+            Some(Row {
                 vol,
                 id: id.get(),
                 dir_path: index.path(node.parent()),
@@ -284,7 +306,7 @@ pub fn build_rows(indices: &[&Index], hits: &[Hit], offset: usize, count: usize)
                 is_synthetic: node.is_synthetic(),
                 is_reparse: flags.contains(crate::model::entry::EntryFlags::REPARSE),
                 name,
-            }
+            })
         })
         .collect()
 }
@@ -305,6 +327,9 @@ pub fn summarize(indices: &[&Index], hits: &[Hit], picks: &[u32]) -> SelectionSu
         let Some(&hit) = hits.get(pick as usize) else {
             continue;
         };
+        if resolve(indices, hit).is_none() {
+            continue;
+        }
         summary.count += 1;
         summary.bytes += effective_size(indices, hit);
         summary.allocated += effective_allocated(indices, hit);
@@ -393,6 +418,23 @@ mod tests {
             entry(11, 5, "Alpha.pdf", 300, 1),
             entry(12, 5, "charlie.txt", 200, 2),
         ]);
+        b.finish().0
+    }
+
+    /// A volume with fewer nodes than [`index`], for the "scanned a smaller
+    /// drive" half of the stale-hit regression.
+    fn small_index() -> Index {
+        let caps = crate::service::scan::ntfs_caps("D:".to_string());
+        let mut b = IndexBuilder::new(caps, CancellationToken::new());
+        let _ = b.push_batch(&[RawEntry {
+            fs_id: 5,
+            parent_id: 5,
+            name: "",
+            size: 0,
+            allocated: 0,
+            times: Times::default(),
+            flags: EntryFlags::DIRECTORY,
+        }]);
         b.finish().0
     }
 
@@ -530,6 +572,32 @@ mod tests {
             names(&index, &h),
             vec!["Alpha.pdf", "bravo.txt", "charlie.txt"]
         );
+    }
+
+    #[test]
+    fn hits_that_outlived_their_volumes_are_dropped_rather_than_fatal() {
+        // Regression: pressing Scan clears the loaded volumes, but the last
+        // query's hits stayed behind. A row window or a selection total asked
+        // for in that gap resolved a node id against a volume that was gone -
+        // an out-of-bounds index, which in a `panic = "abort"` release build
+        // takes the process down with nothing in the log.
+        let index = index();
+        let h = hits(&index);
+        assert!(!h.is_empty());
+
+        // No volumes at all: mid-scan, before the new index is installed.
+        assert!(build_rows(&[], &h, 0, 10).is_empty());
+        assert_eq!(summarize(&[], &h, &[0, 1]).count, 0);
+        assert_eq!(summarize_all(&[], &h).bytes, 0);
+
+        // A volume set that exists but is smaller than the ids refer to -
+        // scanning a different, smaller drive.
+        let small = small_index();
+        let last = crate::model::index::NodeId::new(index.len() as u32 - 1);
+        let stale = vec![(0u16, last)];
+        assert!(small.len() < index.len());
+        assert!(build_rows(&[&small], &stale, 0, 10).is_empty());
+        assert_eq!(summarize(&[&small], &stale, &[0]).count, 0);
     }
 
     #[test]

@@ -111,6 +111,12 @@ pub fn start_scan(
         // targets in one run, not from accumulating runs. The sort-rank
         // cache indexes into these volumes, so it dies with them.
         inner.volumes.clear();
+        // The hits describe *those* volumes: a slot number and a node id, both
+        // meaningless the moment the indexes behind them are gone. Anything
+        // that resolved one before the new query lands - a row window, a
+        // selection total - would be reading a node id of 3.4M against a
+        // volume that no longer exists, or against a smaller one.
+        inner.view.hits = Arc::new(Vec::new());
         inner.sort_ranks.clear();
         inner.ranks_epoch += 1;
         let cancel = CancellationToken::new();
