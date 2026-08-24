@@ -32,9 +32,10 @@ use emfit_core::service::{
     breakdown, elevation, presets, scan, search, tree, treemap, view, volume,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::dto::{
-    CacheUsageDto, DrillDto, NodeInfoDto, PresetDto, RawQueryDto, RowWindowDto, ScanDoneDto,
+    CacheUsageDto, DrillDto, FiltersDto, NodeInfoDto, RawQueryDto, RowWindowDto, ScanDoneDto,
     ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto, SyntaxSectionDto, TreeRowDto,
     TreemapRectDto, TypeRowDto, ViewUpdatedDto, VolumeDto,
 };
@@ -756,11 +757,25 @@ pub fn selection_summary(
     summary.into()
 }
 
-/// The preset filters (`Filters.csv`): built-ins, or the user's own file
-/// beside the app config when present.
+/// The preset filters (`Filters.csv`): the user's own file beside the app
+/// config when it has one, otherwise the built-in set.
+///
+/// Re-reads the file on every call, so editing it and reopening the filter
+/// menu is enough - no restart.
 #[tauri::command]
-pub fn list_presets() -> Vec<PresetDto> {
-    presets::load().into_iter().map(Into::into).collect()
+pub fn list_presets() -> FiltersDto {
+    presets::load().into()
+}
+
+/// Open `Filters.csv` in whatever the OS uses for it, writing a starter file
+/// from the built-in set first if there is none.
+#[tauri::command]
+pub fn edit_filters(app: AppHandle) -> CommandResult<String> {
+    let path = presets::ensure_user_file()?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| CommandError::Shell(format!("could not open {}: {e}", path.display())))?;
+    Ok(path.display().to_string())
 }
 
 /// The query language, for the Search syntax dialog. Generated from the

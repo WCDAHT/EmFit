@@ -10,7 +10,7 @@ import type {
   CacheUsage,
   NodeInfoDto,
   NodeRef,
-  PresetDto,
+  FiltersDto,
   SyntaxSectionDto,
   RawQueryDto,
   RowWindowDto,
@@ -106,9 +106,15 @@ export function selectionSummary(
   return invoke("selection_summary", { picks, all });
 }
 
-/** The `Filters.csv` presets (built-in, or the user's own file). */
-export function listPresets(): Promise<PresetDto[]> {
+/** The `Filters.csv` presets, re-read from disk on every call. */
+export function listPresets(): Promise<FiltersDto> {
   return invoke("list_presets");
+}
+
+/** Open `Filters.csv` in the OS editor, creating a starter file if needed.
+ *  Resolves to the path it opened. */
+export function editFilters(): Promise<string> {
+  return invoke("edit_filters");
 }
 
 /** The query language, for the Search syntax dialog. */

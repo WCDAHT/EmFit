@@ -173,6 +173,16 @@ export interface PresetDto {
   search: string;
 }
 
+/** The filter list and where it came from. */
+export interface FiltersDto {
+  presets: PresetDto[];
+  /** Where `Filters.csv` lives, whether or not it exists yet. */
+  path: string | null;
+  /** False when the built-in set is standing in. */
+  from_file: boolean;
+  problems: string[];
+}
+
 /** One row of the search-syntax reference. */
 export interface SyntaxEntryDto {
   token: string;

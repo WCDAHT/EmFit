@@ -10,19 +10,18 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { listPresets } from "../ipc";
+  import { editFilters } from "../ipc";
   import {
     session,
     hooks,
     queryChanged,
     filtersActive,
     clearFilters,
+    reloadFilters,
   } from "../session.svelte";
-  import type { PresetDto } from "../types";
   import Icon from "../components/Icon.svelte";
   import AdvancedSearch from "../components/AdvancedSearch.svelte";
 
-  let presets: PresetDto[] = $state([]);
   let searchInput: HTMLInputElement | undefined = $state();
   let advancedOpen = $state(false);
 
@@ -37,11 +36,18 @@
       queryChanged(true);
       searchInput?.focus();
     };
-    presets = await listPresets();
+    await reloadFilters();
   });
 
+  /** The filter menu is where a `Filters.csv` edit shows up: re-read it every
+   *  time the menu opens rather than making the user restart. */
+  function toggleFilters() {
+    session.filtersOpen = !session.filtersOpen;
+    if (session.filtersOpen) void reloadFilters();
+  }
+
   function onPresetChange() {
-    const preset = presets.find((p) => p.name === session.presetName);
+    const preset = session.filters.presets.find((p) => p.name === session.presetName);
     session.preset = preset?.search ?? "";
     queryChanged(true);
   }
@@ -88,7 +94,7 @@
       aria-label="Preset filter"
     >
       <option value="">Everything</option>
-      {#each presets.filter((p) => p.search !== "") as p (p.name)}
+      {#each session.filters.presets.filter((p) => p.search !== "") as p (p.name)}
         <option value={p.name}>{p.name}</option>
       {/each}
     </select>
@@ -97,7 +103,7 @@
       class="filters-toggle"
       class:active={filtersActive()}
       title="More filters"
-      onclick={() => (session.filtersOpen = !session.filtersOpen)}
+      onclick={toggleFilters}
     >
       <Icon name="funnel" />
       {#if filtersActive()}<span class="dot"></span>{/if}
@@ -174,6 +180,14 @@
       </label>
 
       <button
+        class="edit-filters"
+        title={`Edit the filter list (${session.filters.path ?? "Filters.csv"})`}
+        onclick={() => void editFilters()}
+      >
+        Edit filters...
+      </button>
+
+      <button
         class="advanced"
         title="Build a query from a form - every search option, explained"
         onclick={() => (advancedOpen = true)}
@@ -181,6 +195,13 @@
         Advanced...
       </button>
     </div>
+
+    {#if session.filters.problems.length > 0}
+      <div class="filter-problems">
+        <span>Filters.csv:</span>
+        {session.filters.problems.join("; ")}
+      </div>
+    {/if}
   {/if}
 
   <AdvancedSearch open={advancedOpen} onClose={() => (advancedOpen = false)} />
@@ -331,8 +352,8 @@
   .panel .check {
     cursor: pointer;
   }
+  .edit-filters,
   .advanced {
-    margin-left: auto;
     height: 24px;
     padding: 0 var(--space-3);
     border: 1px solid var(--border-strong);
@@ -343,9 +364,22 @@
     font-size: var(--font-size-body);
     cursor: pointer;
   }
+  .edit-filters:hover,
   .advanced:hover {
     background: var(--surface-hover);
     border-color: var(--selection);
+  }
+  .edit-filters {
+    margin-left: auto;
+  }
+
+  .filter-problems {
+    padding: var(--space-1) var(--space-3);
+    color: var(--warning);
+    font-size: var(--font-size-caption);
+  }
+  .filter-problems span {
+    font-weight: var(--font-weight-semibold);
   }
 
   .meta {

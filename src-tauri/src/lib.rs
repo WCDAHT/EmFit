@@ -68,6 +68,7 @@ pub fn run() {
                 .build()?;
             let search = SubmenuBuilder::new(app, "Search")
                 .text("syntax", "Search syntax...")
+                .text("edit_filters", "Edit filters...")
                 .build()?;
             let help = SubmenuBuilder::new(app, "Help")
                 .text("shortcuts", "Keyboard shortcuts\tF1")
@@ -105,6 +106,7 @@ pub fn run() {
             commands::selection_summary,
             commands::list_presets,
             commands::search_syntax,
+            commands::edit_filters,
             commands::tree_roots,
             commands::tree_children,
             commands::node_lineage,

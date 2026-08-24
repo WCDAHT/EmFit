@@ -9,19 +9,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { advanced, TYPES } from "../../advanced.svelte";
-  import { listPresets } from "../../ipc";
-  import { queryChanged, session } from "../../session.svelte";
-  import type { PresetDto } from "../../types";
+  import { editFilters } from "../../ipc";
+  import { queryChanged, reloadFilters, session } from "../../session.svelte";
   import { tip } from "../../tooltip";
 
-  let presets: PresetDto[] = $state([]);
-
-  onMount(async () => {
-    presets = await listPresets();
-  });
+  // Opening the dialog is another moment a `Filters.csv` edit should show up.
+  onMount(() => void reloadFilters());
 
   function onPresetChange() {
-    const preset = presets.find((p) => p.name === session.presetName);
+    const preset = session.filters.presets.find((p) => p.name === session.presetName);
     session.preset = preset?.search ?? "";
     queryChanged(true);
   }
@@ -41,10 +37,16 @@
       aria-label="Preset filter"
     >
       <option value="">Everything</option>
-      {#each presets.filter((p) => p.search !== "") as p (p.name)}
+      {#each session.filters.presets.filter((p) => p.search !== "") as p (p.name)}
         <option value={p.name}>{p.name}</option>
       {/each}
     </select>
+    <button
+      use:tip={`Filters are a two-column CSV: a name and the search it runs. Opens ${session.filters.path ?? "Filters.csv"}`}
+      onclick={() => void editFilters()}
+    >
+      Edit...
+    </button>
   </div>
 
   <div class="row">
@@ -70,7 +72,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: 140px 1fr;
+    grid-template-columns: 140px 1fr auto;
     align-items: center;
     gap: var(--space-3);
   }
@@ -94,5 +96,20 @@
   }
   select:focus {
     border-color: var(--selection);
+  }
+
+  button {
+    height: var(--input-height);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-small);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: var(--font-size-body);
+    cursor: pointer;
+  }
+  button:hover {
+    background: var(--surface-hover);
   }
 </style>

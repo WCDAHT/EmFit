@@ -8,8 +8,9 @@
 // updates the result metadata.
 
 import { SvelteSet } from "svelte/reactivity";
-import { selectionSummary, setQuery, setSort } from "./ipc";
+import { listPresets, selectionSummary, setQuery, setSort } from "./ipc";
 import type {
+  FiltersDto,
   NodeRef,
   RawQueryDto,
   ScanTarget,
@@ -43,6 +44,9 @@ export const session = $state({
   /** The selected preset's name. Held beside its search string so the
    *  toolbar dropdown and the Advanced Search dialog show the same one. */
   presetName: "",
+  /** The loaded `Filters.csv`, shared by the toolbar dropdown and the
+   *  Advanced Search dialog. Refreshed by `reloadFilters`. */
+  filters: { presets: [], path: null, from_file: false, problems: [] } as FiltersDto,
   includeHidden: true,
   includeSystem: true,
   caseSensitive: false,
@@ -126,6 +130,24 @@ export function addTarget(target: ScanTarget) {
 export function removeTarget(key: string) {
   session.targets = session.targets.filter((t) => t.key !== key);
   delete session.scan[key];
+}
+
+/** Re-read `Filters.csv`. Called when the filter menu opens, so editing the
+ *  file and coming back is enough - no restart. If the selected filter is no
+ *  longer in the file, the selection drops back to Everything rather than
+ *  silently keeping a search nothing in the list corresponds to. */
+export async function reloadFilters() {
+  session.filters = await listPresets();
+  const still = session.filters.presets.find((p) => p.name === session.presetName);
+  if (session.presetName !== "" && !still) {
+    session.presetName = "";
+    session.preset = "";
+    queryChanged(true);
+  } else if (still && still.search !== session.preset) {
+    // The row was edited; run what the file says now.
+    session.preset = still.search;
+    queryChanged(true);
+  }
 }
 
 /** Imperative hooks views register so root-level shortcuts can reach them

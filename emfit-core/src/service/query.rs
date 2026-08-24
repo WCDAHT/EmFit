@@ -807,6 +807,31 @@ mod tests {
     }
 
     #[test]
+    fn a_presets_bare_modifiers_govern_the_typed_text() {
+        // A preset whose search starts with a bare modifier - which is how
+        // `Filters.csv` says "this filter matches case" (presets.rs).
+        let q = Query::parse(&RawQuery {
+            text: "report".to_string(),
+            preset: "case: ext:log".to_string(),
+            ..RawQuery::default()
+        });
+        assert_eq!(
+            q.expr,
+            Expr::And(vec![
+                Expr::Term(Term::Ext(vec!["log".to_string()])),
+                Expr::Term(Term::Name(NameTerm::new(
+                    "report",
+                    Mods {
+                        case: Some(true),
+                        ..Mods::default()
+                    }
+                ))),
+            ]),
+            "the flag reaches the term the user typed, not just the preset's"
+        );
+    }
+
+    #[test]
     fn positives_skip_what_is_negated() {
         let q = parse_text("report !draft ext:pdf");
         let (mut patterns, mut extensions) = (Vec::new(), Vec::new());

@@ -38,9 +38,12 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
   menu: names, folder, dates, size, type, extension, attributes, regex,
   lengths, and what a folder holds. Every control says which syntax it writes,
   and anything it cannot express is carried through untouched.
-- **Preset filters** in Everything's `Filters.csv` format (Audio, Video,
-  Documents, ...); drop your own `Filters.csv` next to the config to replace
-  them.
+- **Preset filters** you can edit: a two-column `Filters.csv` of a name and
+  the search it runs. **Search > Edit filters...** writes a starter file from
+  the built-in set (Audio, Video, Documents, ...) and opens it; reopening the
+  filter menu picks up your changes without a restart. Everything's own
+  `Filters.csv` drops straight in - its extra columns are ignored, because the
+  search grammar already expresses them.
 - **Case folding the volume's way** - name matching uses the volume's own
   NTFS `$Upcase` table, not a global rule.
 - **Honest accounting**: hard links are listed under every name but their

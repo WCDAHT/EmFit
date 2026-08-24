@@ -22,7 +22,7 @@
   import TreeView from "./lib/views/TreeView.svelte";
   import StatusBar from "./lib/views/StatusBar.svelte";
   import { toggleThemeMode, syncThemeWithConfig } from "./lib/theme";
-  import { cancelScan, getConfig, listVolumes } from "./lib/ipc";
+  import { cancelScan, editFilters, getConfig, listVolumes } from "./lib/ipc";
   import {
     session,
     hooks,
@@ -151,6 +151,9 @@
             break;
           case "syntax":
             syntaxOpen = true;
+            break;
+          case "edit_filters":
+            void editFilters();
             break;
           case "shortcuts":
             shortcutsOpen = true;

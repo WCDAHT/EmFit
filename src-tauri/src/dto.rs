@@ -8,7 +8,7 @@
 
 use emfit_core::model::volume::VolumeInfo;
 use emfit_core::service::breakdown::TypeRow;
-use emfit_core::service::presets::Preset;
+use emfit_core::service::presets::{Filters, Preset};
 use emfit_core::service::query::RawQuery;
 use emfit_core::service::syntax::SyntaxSection;
 use emfit_core::service::task::Progress;
@@ -294,6 +294,29 @@ impl From<Preset> for PresetDto {
         Self {
             name: p.name,
             search: p.search,
+        }
+    }
+}
+
+/// The filter list plus where it came from, so the UI can offer to edit the
+/// file and can say what is wrong with it.
+#[derive(Serialize, Debug, Clone)]
+pub struct FiltersDto {
+    pub presets: Vec<PresetDto>,
+    /// Where `Filters.csv` lives, whether or not it exists yet.
+    pub path: Option<String>,
+    /// False when the built-in set is standing in.
+    pub from_file: bool,
+    pub problems: Vec<String>,
+}
+
+impl From<Filters> for FiltersDto {
+    fn from(f: Filters) -> Self {
+        Self {
+            presets: f.presets.into_iter().map(Into::into).collect(),
+            path: f.path.map(|p| p.display().to_string()),
+            from_file: f.from_file,
+            problems: f.problems,
         }
     }
 }
