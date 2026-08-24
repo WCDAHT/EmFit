@@ -19,6 +19,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rayon::prelude::*;
 
@@ -267,6 +268,31 @@ fn io(path: &Path, source: std::io::Error) -> Error {
 // writing
 // ---------------------------------------------------------------------------
 
+/// What an unfinished snapshot is called, before the rename puts it in place.
+/// Everything that walks the cache directory skips this extension.
+pub const TEMP_EXTENSION: &str = "tmp";
+
+/// A temporary path no other writer will be using.
+///
+/// Unique per *writer*, not per target, and that is the whole point. Two
+/// processes saving the same volume - the app in front of the user and a
+/// background scan behind it - would otherwise both create
+/// `<fingerprint>.tmp`, truncate each other, interleave their bytes, and each
+/// rename the wreckage into place. Section checksums would catch it on the way
+/// back in, so no wrong answer could come of it, but the snapshot would be
+/// gone and the scan it saved would have to be done again.
+///
+/// With separate temporaries the rename stays atomic and whichever finishes
+/// last wins with a complete file. Nothing has to coordinate for that to hold.
+fn temp_path(path: &Path) -> PathBuf {
+    /// Distinguishes writers within one process; the pid distinguishes them
+    /// across processes.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    path.with_extension(format!("{}-{n}.{TEMP_EXTENSION}", std::process::id()))
+}
+
 /// Builds a snapshot file section by section, then swaps it into place.
 ///
 /// Sections are handed over one at a time and written as they arrive, so the
@@ -301,7 +327,7 @@ impl Writer {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
         }
-        let tmp = path.with_extension("tmp");
+        let tmp = temp_path(path);
         let file = File::create(&tmp).map_err(|e| io(&tmp, e))?;
         let mut file = BufWriter::new(file);
 
@@ -802,6 +828,26 @@ mod tests {
     }
 
     #[test]
+    fn two_writers_of_one_snapshot_do_not_share_a_temporary() {
+        // The app and a background scan can both be saving the same volume.
+        // Sharing `<fingerprint>.tmp` meant truncating each other mid-write.
+        let path = std::path::Path::new("cache").join(format!("aaaa.{}", "emfit"));
+        let first = temp_path(&path);
+        let second = temp_path(&path);
+
+        assert_ne!(first, second);
+        for temp in [&first, &second] {
+            assert_eq!(
+                temp.extension().and_then(|e| e.to_str()),
+                Some(TEMP_EXTENSION),
+                "still has to read as a temporary: {}",
+                temp.display()
+            );
+            assert_ne!(temp, &path, "and must never be the snapshot itself");
+        }
+    }
+
+    #[test]
     fn an_empty_section_round_trips() {
         let path = temp("empty.emfit");
         write(&path, &[(A, Codec::Lz4, Vec::new())]);
@@ -875,9 +921,6 @@ mod tests {
             // Dropped without finish(), as a killed process would.
         }
         assert!(!path.exists(), "no snapshot");
-        assert!(
-            !path.with_extension("tmp").exists(),
-            "no leftover temporary"
-        );
+        assert!(!temp_path(&path).exists(), "no leftover temporary");
     }
 }

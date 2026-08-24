@@ -105,6 +105,12 @@ pub fn save(
     let started = std::time::Instant::now();
     snapshot::save(&path, index, fold, manifest, orders)?;
 
+    // Every snapshot write in every EmFit process goes through here, which
+    // makes it the one place worth tidying from.
+    if let Err(e) = sweep_temporaries() {
+        tracing::debug!(error = %e, "cache: could not sweep temporaries");
+    }
+
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     let elapsed = started.elapsed();
     tracing::info!(
@@ -293,6 +299,53 @@ pub fn clear() -> Result<usize> {
     Ok(removed)
 }
 
+/// How long an abandoned temporary sits before it is swept.
+///
+/// A snapshot write takes seconds. An hour is far more slack than a very large
+/// volume on a very slow disk could need, and erring long is the safe
+/// direction: sweeping too eagerly would delete a file another process is
+/// still writing, while sweeping too late costs some disk until the next scan.
+const TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Delete temporaries left by writes that never finished.
+///
+/// [`format::Writer`] removes its own on drop, so these exist only where no
+/// Rust code got to run: a killed process, a power loss. Before per-writer
+/// temporary names they were self-limiting, because the next write to the same
+/// volume reused and truncated the name; now that each writer has its own,
+/// nothing would ever clean them up.
+pub fn sweep_temporaries() -> Result<usize> {
+    sweep_temporaries_in(&dir()?)
+}
+
+fn sweep_temporaries_in(dir: &Path) -> Result<usize> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(0); // no cache directory yet
+    };
+
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some(format::TEMP_EXTENSION) {
+            continue;
+        }
+        // Another process may be part-way through writing this one.
+        let young = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .and_then(|at| at.elapsed().map_err(std::io::Error::other))
+            .is_ok_and(|age| age < TEMP_GRACE);
+        if young {
+            continue;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            tracing::info!(path = %path.display(), "cache: swept an abandoned temporary");
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// True when `path` looks like a snapshot rather than a disk image.
 pub fn is_snapshot(path: &Path) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
@@ -312,6 +365,37 @@ mod tests {
         let dir = dir().expect("resolves in a test environment");
         assert!(dir.ends_with(CACHE_DIR_NAME), "got {}", dir.display());
         assert!(dir.to_string_lossy().contains(app::PRODUCT));
+    }
+
+    #[test]
+    fn temporaries_are_swept_once_they_are_old_enough() {
+        let dir = std::env::temp_dir().join(format!("emfit-sweep-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+
+        let fresh = dir.join(format!("aaaa.{}-0.tmp", std::process::id()));
+        let snapshot = dir.join(format!("bbbb.{EXTENSION}"));
+        std::fs::write(&fresh, b"half a snapshot").unwrap();
+        std::fs::write(&snapshot, b"not really, but not a temporary either").unwrap();
+
+        // Nothing is old enough yet, and a real snapshot is never a candidate.
+        assert_eq!(sweep_temporaries_in(&dir).unwrap(), 0);
+        assert!(fresh.exists());
+        assert!(snapshot.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn temporaries_are_not_counted_as_cached_scans() {
+        // `list` keys off the snapshot extension, so a temporary - anyone's,
+        // mid-write or abandoned - is neither listed nor charged against the
+        // eviction budget.
+        let temp = std::path::Path::new("cache").join("aaaa.1234-0.tmp");
+        assert_ne!(
+            temp.extension().and_then(|e| e.to_str()),
+            Some(EXTENSION),
+            "a temporary must not read as a snapshot"
+        );
     }
 
     #[test]
