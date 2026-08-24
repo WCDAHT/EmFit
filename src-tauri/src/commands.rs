@@ -75,9 +75,18 @@ pub fn elevation_status() -> bool {
 }
 
 /// The one-click fix when it can't (features.md sec 1.1).
+///
+/// On success this process exits: the elevated instance is taking over, and
+/// two windows over the same drives is worse than either one alone - the
+/// unelevated one cannot scan, and whichever the user clicks on is a coin
+/// toss. A dismissed UAC prompt is an error instead, so nothing exits and the
+/// banner stays put.
 #[tauri::command]
-pub fn relaunch_elevated() -> CommandResult<()> {
+pub fn relaunch_elevated(app: AppHandle) -> CommandResult<()> {
     elevation::relaunch_elevated()?;
+    // `SEE_MASK_NOASYNC` means the shell has already acted on the request by
+    // the time that returns, so exiting now cannot cancel the launch.
+    app.exit(0);
     Ok(())
 }
 

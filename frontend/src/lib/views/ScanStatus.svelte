@@ -6,6 +6,23 @@
   import { relaunchElevated } from "../ipc";
   import { session } from "../session.svelte";
 
+  let relaunching = $state(false);
+
+  /** Hand over to an elevated instance. On success this window is gone before
+   *  the await resolves - the shell command exits the process once the launch
+   *  is through. Only a refusal comes back here. */
+  async function relaunch() {
+    relaunching = true;
+    try {
+      await relaunchElevated();
+    } catch (e) {
+      // Almost always a dismissed UAC prompt, which is a decision, not a
+      // fault: stay unelevated and leave the banner up.
+      console.warn(`elevated relaunch did not happen: ${e}`);
+      relaunching = false;
+    }
+  }
+
   function chipText(key: string): string {
     const s = session.scan[key];
     if (!s) return "";
@@ -30,7 +47,9 @@
 {#if !session.elevated}
   <div class="banner">
     <span>Not running as Administrator - raw volume scans will be refused.</span>
-    <button onclick={() => void relaunchElevated()}>Relaunch elevated</button>
+    <button onclick={() => void relaunch()} disabled={relaunching}>
+      {relaunching ? "Waiting for Windows..." : "Relaunch elevated"}
+    </button>
   </div>
 {/if}
 
