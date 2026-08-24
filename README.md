@@ -77,10 +77,10 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
     *Colors...* and persist in the appdata config;
   - a **file types** panel (what kind of thing is eating the disk); ticking
     types dims the map and filters the list;
-  - **Top files / Top folders** shortcuts, and a logical-vs-on-disk size
-    switch. Selection is shared: click a rectangle and the tree reveals it,
-    and vice versa. Treemap geometry is always allocated bytes, so
-    hard-linked and sparse data is never drawn larger than it is.
+  - a logical-vs-on-disk size switch. Selection is shared: click a rectangle
+    and the tree reveals it, and vice versa. Treemap geometry is always
+    allocated bytes, so hard-linked and sparse data is never drawn larger
+    than it is.
 
 ### Coming next
 

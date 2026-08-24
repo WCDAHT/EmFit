@@ -12,23 +12,11 @@
   import FolderTree from "./FolderTree.svelte";
   import Treemap from "./Treemap.svelte";
   import TypesPanel from "./TypesPanel.svelte";
-  import { session, queryChanged, sortBy } from "../session.svelte";
+  import { session } from "../session.svelte";
 
   /** The file-types panel is parked until its UX is designed (user call,
    *  2026-07-27). The component and its plumbing stay alive behind this. */
   const SHOW_TYPES_PANEL = false;
-
-  /** "Top files" / "Top folders" (features.md sec 4.4): the List tab already is
-   *  that view once kind-filtered and size-sorted - jump it there. */
-  function topN(kind: "file" | "folder") {
-    session.text = `${kind}:`;
-    session.tab = "list";
-    if (session.sortKey !== "size" || session.sortAsc) {
-      session.sortKey = "path"; // force sortBy to reset to size desc
-      sortBy("size");
-    }
-    queryChanged(true);
-  }
 
   // --- splitter: applies on release only ---
   let dragging = $state(false);
@@ -82,15 +70,11 @@
   onmouseup={dragging ? onDragEnd : undefined}
 />
 
-<!-- Depth, color mode, and units now live in the Settings dialog (native
-     View menu) - the toolbar keeps only view jumps. The treemap-depth and
-     size-mode session state stays alive underneath. -->
-<div class="controls">
-  <span class="flex"></span>
-  <button class="quick" onclick={() => topN("file")}>Top files</button>
-  <button class="quick" onclick={() => topN("folder")}>Top folders</button>
-</div>
-
+<!-- No toolbar: depth, color mode, and units live in the Settings dialog
+     (native View menu), and the Top files / Top folders jumps are gone (user
+     call, 2026-08-24) - `file:` or `folder:` in the search box is the same
+     view. The treemap-depth and size-mode session state stays alive
+     underneath. -->
 <FolderTree />
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -123,30 +107,6 @@
 {/if}
 
 <style>
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-  }
-  .flex {
-    flex: 1;
-  }
-  .quick {
-    height: 24px;
-    padding: 0 var(--space-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-small);
-    background: var(--surface-raised);
-    color: var(--text-secondary);
-    font-family: inherit;
-    font-size: var(--font-size-caption);
-    cursor: pointer;
-  }
-  .quick:hover {
-    color: var(--text-primary);
-    background: var(--surface-hover);
-  }
-
   .splitter {
     flex: 0 0 auto;
     height: 5px;
