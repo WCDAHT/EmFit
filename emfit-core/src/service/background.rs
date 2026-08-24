@@ -24,7 +24,7 @@ use crate::error::{Error, Result};
 use crate::service::config::Config;
 use crate::service::lock::{self, ProcessLock};
 use crate::service::task::{CancellationToken, Progress};
-use crate::service::{cache, scan, volume};
+use crate::service::{cache, scan, view, volume};
 
 /// What one background run did, for the log and for `--background-scan`'s
 /// exit reporting.
@@ -32,6 +32,8 @@ use crate::service::{cache, scan, volume};
 pub struct RunSummary {
     /// Volumes scanned and written.
     pub scanned: Vec<String>,
+    /// Volumes whose snapshot was already current, so it was left alone.
+    pub current: Vec<String>,
     /// Volumes another process was already scanning.
     pub busy: Vec<String>,
     /// Volumes that scanned but cannot be kept scanned: without a change
@@ -48,6 +50,7 @@ impl RunSummary {
     /// True when the run had nothing at all to report.
     pub fn is_empty(&self) -> bool {
         self.scanned.is_empty()
+            && self.current.is_empty()
             && self.busy.is_empty()
             && self.uncacheable.is_empty()
             && self.missing.is_empty()
@@ -57,8 +60,9 @@ impl RunSummary {
     /// One line for the log.
     pub fn summary(&self) -> String {
         format!(
-            "{} scanned, {} busy, {} uncacheable, {} missing, {} failed",
+            "{} scanned, {} current, {} busy, {} uncacheable, {} missing, {} failed",
             self.scanned.len(),
+            self.current.len(),
             self.busy.len(),
             self.uncacheable.len(),
             self.missing.len(),
@@ -170,8 +174,9 @@ pub fn run(cancel: &CancellationToken) -> Result<RunSummary> {
         };
 
         match scan_and_save(info, &config, cancel) {
-            Ok(true) => summary.scanned.push(wanted.clone()),
-            Ok(false) => summary.uncacheable.push(wanted.clone()),
+            Ok(Outcome::Written) => summary.scanned.push(wanted.clone()),
+            Ok(Outcome::AlreadyCurrent) => summary.current.push(wanted.clone()),
+            Ok(Outcome::Uncacheable) => summary.uncacheable.push(wanted.clone()),
             Err(e) => {
                 tracing::warn!(volume = %wanted, error = %e, "background: scan failed");
                 summary.failed.push((wanted.clone(), e.to_string()));
@@ -198,18 +203,26 @@ pub fn run(cancel: &CancellationToken) -> Result<RunSummary> {
     Ok(summary)
 }
 
+/// What one volume's pass came to.
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    /// A fresh snapshot replaced the old one.
+    Written,
+    /// The snapshot on disk was already up to date, so it was left alone.
+    AlreadyCurrent,
+    /// The scan worked but cannot be kept: a volume with no change journal has
+    /// no position to replay a snapshot from, so storing one would only be a
+    /// way to show stale data later. A property of the volume, not a fault, so
+    /// it is reported rather than retried as an error every interval.
+    Uncacheable,
+}
+
 /// Scan one volume and write its snapshot - the whole point of the run.
-///
-/// `false` means the scan succeeded but produced nothing worth keeping: a
-/// volume with no change journal has no position to replay a snapshot from, so
-/// storing one would only be a way to show stale data later. That is a
-/// property of the volume, not a fault, so it is reported rather than retried
-/// as an error every interval.
 fn scan_and_save(
     info: &crate::model::volume::VolumeInfo,
     config: &Config,
     cancel: &CancellationToken,
-) -> Result<bool> {
+) -> Result<Outcome> {
     let options = scan::VolumeScanOptions {
         // Replaying the journal onto the last snapshot gives the same index
         // for a fraction of the reads, which matters more here than anywhere:
@@ -230,8 +243,25 @@ fn scan_and_save(
             volume = %info.display_name(),
             "background: no change journal, so this volume cannot be kept scanned"
         );
-        return Ok(false);
+        return Ok(Outcome::Uncacheable);
     };
+
+    // The index came straight out of the snapshot with nothing replayed onto
+    // it, so the file on disk already says exactly this. Rewriting it would
+    // spend a hundred megabytes of writes to change a timestamp - and would
+    // throw away the sort orders the app appended to it, which cost ten
+    // seconds to build and are the difference between opening sorted and
+    // waiting. Leaving it alone is both cheaper and better.
+    if matches!(
+        &outcome.source,
+        scan::OutcomeSource::Cached { replay, .. } if replay.records == 0
+    ) {
+        tracing::info!(
+            volume = %info.display_name(),
+            "background: the snapshot is already current; leaving it as it is"
+        );
+        return Ok(Outcome::AlreadyCurrent);
+    }
 
     let manifest = cache::manifest_for(
         info,
@@ -249,7 +279,34 @@ fn scan_and_save(
         path = %path.display(),
         "background: snapshot written"
     );
-    Ok(true)
+
+    // The replay renumbered nodes, so whatever orders the old snapshot carried
+    // no longer address the right rows and had to go. Build them again here
+    // rather than leaving the app to do it: this is unattended time, and it is
+    // the whole point of scanning ahead that opening the window costs nothing.
+    append_orders(&manifest.volume, &outcome.index);
+    Ok(Outcome::Written)
+}
+
+/// Rebuild and store the sort columns worth caching. Best-effort: a snapshot
+/// without them is merely slower to open, so nothing here is worth failing a
+/// run over.
+fn append_orders(stamp: &cache::VolumeStamp, index: &crate::model::index::Index) {
+    let started = std::time::Instant::now();
+    let orders: Vec<(view::SortKey, Vec<u32>)> = cache::CACHED_ORDERS
+        .iter()
+        .map(|&key| (key, view::build_order(index, key)))
+        .collect();
+
+    match cache::append_orders(stamp, index.len(), &orders) {
+        Ok(0) => {}
+        Ok(added) => tracing::info!(
+            added,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "background: sort orders rebuilt and stored"
+        ),
+        Err(e) => tracing::warn!(error = %e, "background: could not store the sort orders"),
+    }
 }
 
 #[cfg(test)]
@@ -271,6 +328,7 @@ mod tests {
     fn a_summary_reports_each_outcome() {
         let summary = RunSummary {
             scanned: vec!["C:".to_string()],
+            current: Vec::new(),
             busy: vec!["D:".to_string()],
             uncacheable: Vec::new(),
             missing: vec!["Z:".to_string()],
@@ -279,7 +337,7 @@ mod tests {
         assert!(!summary.is_empty());
         assert_eq!(
             summary.summary(),
-            "1 scanned, 1 busy, 0 uncacheable, 1 missing, 1 failed"
+            "1 scanned, 0 current, 1 busy, 0 uncacheable, 1 missing, 1 failed"
         );
         assert!(RunSummary::default().is_empty());
     }
