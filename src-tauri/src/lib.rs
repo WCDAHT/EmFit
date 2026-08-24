@@ -15,7 +15,8 @@ mod watch;
 
 use std::sync::Mutex;
 
-use emfit_core::service::{config::Config, logging};
+use emfit_core::service::task::CancellationToken;
+use emfit_core::service::{background, config::Config, logging};
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
@@ -24,11 +25,40 @@ pub use error::CommandError;
 /// Build and run the application. Called by `main.rs` on desktop and by the
 /// generated mobile entry point on iOS/Android.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The flag Task Scheduler runs EmFit with (`background-scan.md`). Not a
+/// documented CLI: the app registers the task itself, and a user who wants a
+/// scan on demand has a window for it.
+const BACKGROUND_SCAN_FLAG: &str = "--background-scan";
+
+/// One background pass, for the scheduled task. Returns the process exit
+/// code: zero unless a volume actually failed, so Task Scheduler's last-result
+/// column means something.
+fn run_background_scan() -> i32 {
+    tracing::info!("background scan starting");
+    match background::run(&CancellationToken::new()) {
+        Ok(summary) => {
+            tracing::info!(result = %summary.summary(), "background scan done");
+            i32::from(!summary.failed.is_empty())
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "background scan failed");
+            1
+        }
+    }
+}
+
 pub fn run() {
     // STANDARDS sec 4.2: tracing from day one, into a detailed plain-text log file
     // under appdata (see `emfit_core::service::logging`). Best-effort - falls
     // back to stdout-only if the log directory can't be created.
     let log_dir = logging::init();
+
+    // The scheduled task runs this same executable with a flag. It scans,
+    // writes its snapshots, and exits - no window is ever created, so none of
+    // the Tauri setup below happens at all.
+    if std::env::args().any(|arg| arg == BACKGROUND_SCAN_FLAG) {
+        std::process::exit(run_background_scan());
+    }
 
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),

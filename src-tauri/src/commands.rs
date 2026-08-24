@@ -24,6 +24,7 @@ use emfit_core::model::volume::VolumeInfo;
 use emfit_core::service::cache;
 use emfit_core::service::config::Config;
 use emfit_core::service::fold::CaseFold;
+use emfit_core::service::lock::{self, ProcessLock};
 use emfit_core::service::query::Query;
 use emfit_core::service::task::{CancellationToken, Progress};
 use emfit_core::service::treemap::TreemapOptions;
@@ -501,6 +502,17 @@ fn run_scan_job(app: &AppHandle, requested: &[ScanTargetDto], cancel: &Cancellat
 
     if !targets.is_empty() {
         let names: Vec<String> = targets.iter().map(|v| v.display_name()).collect();
+
+        // Held for the length of the sweep so a background run skips these
+        // volumes rather than scanning them a second time. Taken, never
+        // waited on: a lock this process cannot get changes nothing about
+        // what it does - the user asked for this scan and gets it - and
+        // concurrent snapshot writes are safe regardless (`cache::format`).
+        let _scan_locks: Vec<ProcessLock> = names
+            .iter()
+            .filter_map(|name| ProcessLock::try_acquire(&lock::volume_scan(name)))
+            .collect();
+
         let progress_app = app.clone();
         let progress_names = names.clone();
         let on_progress = move |slot: usize, progress: Progress| {

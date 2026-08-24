@@ -3,6 +3,7 @@
 //! Services hold dependencies (parser registry, config, http client) and
 //! expose async-friendly methods the UI crate calls through callbacks.
 
+pub mod background;
 pub mod benchlog;
 pub mod breakdown;
 pub mod cache;
@@ -12,6 +13,7 @@ pub mod elevation;
 pub mod export;
 pub mod filetype;
 pub mod fold;
+pub mod lock;
 pub mod logging;
 pub mod presets;
 pub mod query;
