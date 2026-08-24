@@ -19,6 +19,7 @@ pub mod presets;
 pub mod query;
 pub mod replay;
 pub mod scan;
+pub mod schedule;
 pub mod search;
 pub mod syntax;
 pub mod task;

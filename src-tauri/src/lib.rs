@@ -16,7 +16,7 @@ mod watch;
 use std::sync::Mutex;
 
 use emfit_core::service::task::CancellationToken;
-use emfit_core::service::{background, config::Config, logging};
+use emfit_core::service::{background, config::Config, logging, schedule};
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
@@ -25,11 +25,6 @@ pub use error::CommandError;
 /// Build and run the application. Called by `main.rs` on desktop and by the
 /// generated mobile entry point on iOS/Android.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// The flag Task Scheduler runs EmFit with (`background-scan.md`). Not a
-/// documented CLI: the app registers the task itself, and a user who wants a
-/// scan on demand has a window for it.
-const BACKGROUND_SCAN_FLAG: &str = "--background-scan";
-
 /// One background pass, for the scheduled task. Returns the process exit
 /// code: zero unless a volume actually failed, so Task Scheduler's last-result
 /// column means something.
@@ -56,7 +51,7 @@ pub fn run() {
     // The scheduled task runs this same executable with a flag. It scans,
     // writes its snapshots, and exits - no window is ever created, so none of
     // the Tauri setup below happens at all.
-    if std::env::args().any(|arg| arg == BACKGROUND_SCAN_FLAG) {
+    if std::env::args().any(|arg| arg == schedule::BACKGROUND_SCAN_FLAG) {
         std::process::exit(run_background_scan());
     }
 
@@ -137,6 +132,8 @@ pub fn run() {
             commands::list_presets,
             commands::search_syntax,
             commands::edit_filters,
+            commands::sync_background_task,
+            commands::background_task_registered,
             commands::tree_roots,
             commands::tree_children,
             commands::node_lineage,

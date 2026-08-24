@@ -44,6 +44,12 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
   filter menu picks up your changes without a restart. Everything's own
   `Filters.csv` drops straight in - its extra columns are ignored, because the
   search grammar already expresses them.
+- **Background scanning**, off until you ask for it. Settings > Background
+  picks the drives and how often; EmFit then registers a Windows scheduled
+  task called **EmFit Background Scan** that keeps their snapshots current, so
+  opening the app shows a scanned index instead of starting one. Turning it
+  off removes the task, and it can also be deleted from Task Scheduler
+  directly. It runs as you, only while you are logged in, and not on battery.
 - **Case folding the volume's way** - name matching uses the volume's own
   NTFS `$Upcase` table, not a global rule.
 - **Honest accounting**: hard links are listed under every name but their

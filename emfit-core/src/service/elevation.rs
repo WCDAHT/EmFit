@@ -47,6 +47,26 @@ pub fn relaunch_elevated() -> Result<()> {
     }
 }
 
+/// Run a program elevated and wait for it, returning its exit code.
+///
+/// One UAC prompt, at the moment the user asked for the thing that needs it -
+/// which is why this exists rather than relaunching the whole app elevated to
+/// register a scheduled task. Dismissing the prompt is an error, not a zero
+/// exit code, so a caller cannot mistake a refusal for success.
+pub fn run_elevated(exe: &str, args: &str) -> Result<u32> {
+    #[cfg(windows)]
+    {
+        windows_impl::run_elevated(exe, args)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (exe, args);
+        Err(crate::error::Error::UnsupportedPlatform {
+            operation: "elevated execution".to_string(),
+        })
+    }
+}
+
 #[cfg(windows)]
 #[allow(
     unsafe_code,
@@ -58,9 +78,13 @@ mod windows_impl {
     use windows::Win32::Security::{
         GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
     };
-    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-    use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcessToken, WaitForSingleObject,
+    };
+    use windows::Win32::UI::Shell::{
+        SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNORMAL};
     use windows::core::PCWSTR;
 
     use crate::error::{Error, Result};
@@ -130,6 +154,55 @@ mod windows_impl {
             api: "ShellExecuteExW(runas)".to_string(),
             source: std::io::Error::from_raw_os_error(e.code().0),
         })
+    }
+
+    pub(super) fn run_elevated(exe: &str, args: &str) -> Result<u32> {
+        let verb = to_wide("runas");
+        let file = to_wide(exe);
+        let parameters = to_wide(args);
+
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).unwrap_or(0),
+            // NOCLOSEPROCESS is what makes `hProcess` valid afterwards, which
+            // is the only way to learn whether the thing actually worked.
+            fMask: SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS,
+            lpVerb: PCWSTR(verb.as_ptr()),
+            lpFile: PCWSTR(file.as_ptr()),
+            lpParameters: PCWSTR(parameters.as_ptr()),
+            // A console flashing up for a fraction of a second is worse than
+            // no window at all; the caller reports the outcome itself.
+            nShow: SW_HIDE.0,
+            ..Default::default()
+        };
+
+        // SAFETY: `info` is fully initialized with a matching cbSize, and each
+        // PCWSTR points at a NUL-terminated buffer that outlives the call.
+        unsafe { ShellExecuteExW(&mut info) }.map_err(|e| Error::WindowsApi {
+            api: "ShellExecuteExW(runas)".to_string(),
+            source: std::io::Error::from_raw_os_error(e.code().0),
+        })?;
+
+        if info.hProcess.is_invalid() {
+            return Err(Error::WindowsApi {
+                api: "ShellExecuteExW(runas)".to_string(),
+                source: std::io::Error::other("no process handle was returned"),
+            });
+        }
+
+        // SAFETY: `hProcess` is the live handle ShellExecuteExW just returned.
+        unsafe { WaitForSingleObject(info.hProcess, INFINITE) };
+
+        let mut code = 0u32;
+        // SAFETY: same handle, and `code` is a live local.
+        let read = unsafe { GetExitCodeProcess(info.hProcess, &mut code) };
+        // SAFETY: closing the handle NOCLOSEPROCESS handed over, exactly once.
+        let _ = unsafe { CloseHandle(info.hProcess) };
+
+        read.map_err(|e| Error::WindowsApi {
+            api: "GetExitCodeProcess".to_string(),
+            source: std::io::Error::from_raw_os_error(e.code().0),
+        })?;
+        Ok(code)
     }
 
     fn to_wide(s: &str) -> Vec<u16> {

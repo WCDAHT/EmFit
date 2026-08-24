@@ -30,7 +30,7 @@ use emfit_core::service::task::{CancellationToken, Progress};
 use emfit_core::service::treemap::TreemapOptions;
 use emfit_core::service::view::SortKey;
 use emfit_core::service::{
-    breakdown, elevation, presets, scan, search, tree, treemap, view, volume,
+    breakdown, elevation, presets, scan, schedule, search, tree, treemap, view, volume,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -797,6 +797,50 @@ pub fn edit_filters(app: AppHandle) -> CommandResult<String> {
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|e| CommandError::Shell(format!("could not open {}: {e}", path.display())))?;
     Ok(path.display().to_string())
+}
+
+/// Bring the scheduled background-scan task in line with the saved config:
+/// registered when the feature is on with drives chosen, gone otherwise.
+///
+/// Both directions need Administrator, so calling this prompts. The frontend
+/// only calls it when the background settings actually changed - a UAC prompt
+/// on every Settings save would train people to click through it.
+///
+/// Returns whether the task is registered afterwards, which is the state the
+/// dialog should show rather than what it hoped for.
+#[tauri::command]
+pub fn sync_background_task(config: State<'_, Mutex<Config>>) -> CommandResult<bool> {
+    let wanted = config.lock().unwrap().background.clone();
+
+    if !wanted.is_active() {
+        schedule::unregister()?;
+        tracing::info!("background: scheduled task removed");
+        return Ok(false);
+    }
+
+    // Captured here rather than inside the elevated process: after a UAC
+    // prompt the account may be a different administrator, and a task
+    // registered for them would write snapshots into their profile.
+    let user = schedule::current_user().ok_or_else(|| {
+        CommandError::Shell("could not determine the current Windows account".into())
+    })?;
+    let exe = std::env::current_exe()
+        .map_err(|e| CommandError::Shell(format!("could not locate EmFit: {e}")))?;
+
+    schedule::register(&exe, &user, wanted.interval)?;
+    tracing::info!(
+        volumes = wanted.volumes.len(),
+        minutes = wanted.interval.minutes(),
+        "background: scheduled task registered"
+    );
+    Ok(schedule::is_registered())
+}
+
+/// Whether the background-scan task is registered right now. Cheap, and needs
+/// no elevation - the dialog asks every time it opens.
+#[tauri::command]
+pub fn background_task_registered() -> bool {
+    schedule::is_registered()
 }
 
 /// The query language, for the Search syntax dialog. Generated from the

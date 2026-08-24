@@ -117,6 +117,18 @@ export function editFilters(): Promise<string> {
   return invoke("edit_filters");
 }
 
+/** Register or remove the scheduled background-scan task, to match the saved
+ *  config. Prompts for Administrator; resolves to whether it is registered
+ *  afterwards. */
+export function syncBackgroundTask(): Promise<boolean> {
+  return invoke("sync_background_task");
+}
+
+/** Whether the background-scan task is registered right now. */
+export function backgroundTaskRegistered(): Promise<boolean> {
+  return invoke("background_task_registered");
+}
+
 /** The query language, for the Search syntax dialog. */
 export function searchSyntax(): Promise<SyntaxSectionDto[]> {
   return invoke("search_syntax");

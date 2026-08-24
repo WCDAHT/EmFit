@@ -16,7 +16,13 @@
   milestone - plus the free-space toggle).
 -->
 <script lang="ts">
-  import { cacheUsage, clearCache, getConfig, setConfig } from "../ipc";
+  import {
+    cacheUsage,
+    clearCache,
+    getConfig,
+    setConfig,
+    syncBackgroundTask,
+  } from "../ipc";
   import { session, queryChanged } from "../session.svelte";
   import { SIZE_UNITS, type SizeUnit } from "../format";
   import type { ScanInterval } from "../types";
@@ -53,6 +59,11 @@
   let backgroundOn = $state(false);
   let backgroundVolumes = $state<string[]>([]);
   let backgroundInterval = $state<ScanInterval>("sixhourly");
+  /** What was loaded, so Save can tell whether anything here actually
+   *  changed - registering the task prompts for Administrator, and prompting
+   *  on every Save would teach people to click through it. */
+  let backgroundWas = $state("");
+  let backgroundError = $state("");
   // What the cache holds, and what the last clear did. Read when the dialog
   // opens; clearing acts at once rather than waiting for Save, because it is
   // an action, not a setting.
@@ -74,7 +85,9 @@
         backgroundOn = cfg.background.enabled;
         backgroundVolumes = [...cfg.background.volumes];
         backgroundInterval = cfg.background.interval;
+        backgroundWas = JSON.stringify(cfg.background);
       });
+      backgroundError = "";
       cleared = "";
       void refreshCacheUsage();
     }
@@ -132,6 +145,25 @@
       interval: backgroundInterval,
     };
     await setConfig(config);
+
+    // Only when something here moved: this is the one setting whose Save asks
+    // Windows for permission.
+    if (JSON.stringify(config.background) !== backgroundWas) {
+      try {
+        backgroundOn = await syncBackgroundTask();
+      } catch (e) {
+        // A dismissed prompt, or a scheduler that refused. Say so and leave
+        // the switch showing what is actually true rather than what was asked
+        // for - the config is saved either way, so reopening Settings and
+        // saving again retries it.
+        backgroundError = `Windows did not accept the change: ${e}`;
+        backgroundOn = false;
+        config.background.enabled = false;
+        await setConfig(config);
+        tab = "background";
+        return;
+      }
+    }
 
     session.sizeUnit = sizeUnit;
     session.colorMode = mode;
@@ -260,6 +292,14 @@
                 No drives are selected, so nothing would be scanned.
               </p>
             {/if}
+            {#if backgroundError}
+              <p class="hint warn">{backgroundError}</p>
+            {/if}
+            <p class="hint">
+              Saving a change here asks Windows for permission, because it
+              adds or removes a scheduled task. It is called "EmFit Background
+              Scan" and can also be removed from Task Scheduler.
+            </p>
           {:else if tab === "treemap"}
             <label class="field">
               Color files by
