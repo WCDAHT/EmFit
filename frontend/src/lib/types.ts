@@ -15,6 +15,18 @@ export interface AppConfig {
   cache_enabled: boolean;
   /** Ceiling on the cache directory, in MiB. */
   cache_budget_mb: number;
+  background: BackgroundConfig;
+}
+
+/** How often the background scan runs. */
+export type ScanInterval = "hourly" | "sixhourly" | "daily" | "weekly";
+
+/** Keeping chosen volumes scanned in the background. Off until asked for. */
+export interface BackgroundConfig {
+  enabled: boolean;
+  /** Volume display names, e.g. `C:`. */
+  volumes: string[];
+  interval: ScanInterval;
 }
 
 /** Mirror of `CacheUsageDto`: what the scan cache occupies on disk. */

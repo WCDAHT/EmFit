@@ -19,6 +19,7 @@
   import { cacheUsage, clearCache, getConfig, setConfig } from "../ipc";
   import { session, queryChanged } from "../session.svelte";
   import { SIZE_UNITS, type SizeUnit } from "../format";
+  import type { ScanInterval } from "../types";
 
   interface Props {
     open: boolean;
@@ -29,7 +30,18 @@
   const TABS = [
     { id: "general", label: "General" },
     { id: "treemap", label: "Treemap" },
+    { id: "background", label: "Background" },
   ] as const;
+
+  /** The intervals offered, and how each reads. Deliberately a short list -
+   *  an arbitrary number invites a five-minute setting that thrashes the
+   *  disk for no one's benefit. */
+  const INTERVALS: { id: ScanInterval; label: string }[] = [
+    { id: "hourly", label: "Every hour" },
+    { id: "sixhourly", label: "Every 6 hours" },
+    { id: "daily", label: "Every day" },
+    { id: "weekly", label: "Every week" },
+  ];
   type TabId = (typeof TABS)[number]["id"];
   let tab = $state<TabId>("general");
 
@@ -38,6 +50,9 @@
   let mode = $state<"ranked" | "extension">("ranked");
   let showFreeSpace = $state(false);
   let cacheEnabled = $state(true);
+  let backgroundOn = $state(false);
+  let backgroundVolumes = $state<string[]>([]);
+  let backgroundInterval = $state<ScanInterval>("sixhourly");
   // What the cache holds, and what the last clear did. Read when the dialog
   // opens; clearing acts at once rather than waiting for Save, because it is
   // an action, not a setting.
@@ -53,8 +68,13 @@
       sizeUnit = session.sizeUnit;
       mode = session.colorMode;
       showFreeSpace = session.showFreeSpace;
-      // Not mirrored in the session - nothing but this dialog reads it.
-      void getConfig().then((cfg) => (cacheEnabled = cfg.cache_enabled));
+      // Not mirrored in the session - nothing but this dialog reads them.
+      void getConfig().then((cfg) => {
+        cacheEnabled = cfg.cache_enabled;
+        backgroundOn = cfg.background.enabled;
+        backgroundVolumes = [...cfg.background.volumes];
+        backgroundInterval = cfg.background.interval;
+      });
       cleared = "";
       void refreshCacheUsage();
     }
@@ -85,6 +105,15 @@
     }
   }
 
+  /** Scannable drives, from the same list the Sources popup offers. */
+  const scannable = $derived(session.volumes.filter((v) => v.raw_scannable));
+
+  function toggleVolume(key: string, on: boolean) {
+    backgroundVolumes = on
+      ? [...backgroundVolumes, key]
+      : backgroundVolumes.filter((k) => k !== key);
+  }
+
   function unitLabel(u: SizeUnit): string {
     return u === "dynamic" ? "Dynamic (largest unit >= 1)" : u;
   }
@@ -96,6 +125,11 @@
     config.treemap = {
       color_mode: mode,
       show_free_space: showFreeSpace,
+    };
+    config.background = {
+      enabled: backgroundOn,
+      volumes: backgroundVolumes,
+      interval: backgroundInterval,
     };
     await setConfig(config);
 
@@ -182,6 +216,49 @@
             </div>
             {#if cleared}
               <p class="hint">{cleared}</p>
+            {/if}
+          {:else if tab === "background"}
+            <label class="toggle">
+              <input type="checkbox" bind:checked={backgroundOn} />
+              Keep selected drives scanned in the background
+            </label>
+            <p class="hint">
+              Windows runs a scan on its own schedule, so opening EmFit shows
+              a current index instead of starting one. Off unless you turn it
+              on, and turning it off again removes it.
+            </p>
+
+            <fieldset class="drives" disabled={!backgroundOn}>
+              <legend>Drives to keep scanned</legend>
+              {#if scannable.length === 0}
+                <p class="hint">No scannable drives were found.</p>
+              {:else}
+                {#each scannable as v (v.name)}
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      checked={backgroundVolumes.includes(v.name)}
+                      onchange={(e) => toggleVolume(v.name, e.currentTarget.checked)}
+                    />
+                    {v.name}{v.label ? ` (${v.label})` : ""}
+                  </label>
+                {/each}
+              {/if}
+            </fieldset>
+
+            <label class="field">
+              How often
+              <select bind:value={backgroundInterval} disabled={!backgroundOn}>
+                {#each INTERVALS as i (i.id)}
+                  <option value={i.id}>{i.label}</option>
+                {/each}
+              </select>
+            </label>
+
+            {#if backgroundOn && backgroundVolumes.length === 0}
+              <p class="hint warn">
+                No drives are selected, so nothing would be scanned.
+              </p>
             {/if}
           {:else if tab === "treemap"}
             <label class="field">
@@ -332,6 +409,29 @@
   .hint {
     margin: 0;
     color: var(--text-muted);
+    font-size: var(--font-size-caption);
+  }
+  .hint.warn {
+    color: var(--warning);
+  }
+
+  /* The drive list dims wholesale with the master switch, so an unticked
+     switch cannot look like it is still going to scan something. */
+  .drives {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+  }
+  .drives:disabled {
+    opacity: 0.5;
+  }
+  .drives legend {
+    padding: 0 var(--space-2);
+    color: var(--text-secondary);
     font-size: var(--font-size-caption);
   }
 

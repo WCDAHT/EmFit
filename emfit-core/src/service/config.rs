@@ -81,6 +81,10 @@ pub struct Config {
     /// Ceiling on the cache directory, in mebibytes. The oldest snapshots are
     /// evicted after each write until the total fits.
     pub cache_budget_mb: u64,
+
+    /// Keeping chosen volumes scanned in the background
+    /// (`background-scan.md`). Off until the user asks for it.
+    pub background: BackgroundConfig,
     // --- add further settings here (window geometry, recent files, ...) ---
 }
 
@@ -95,7 +99,59 @@ impl Default for Config {
             // Two gigabytes holds several volumes' snapshots; a 3.4M-node C:
             // compresses to well under one.
             cache_budget_mb: 2048,
+            background: BackgroundConfig::default(),
         }
+    }
+}
+
+/// How often the background scan runs. A fixed set rather than a free number:
+/// these map onto what Task Scheduler expresses cleanly, and an arbitrary
+/// interval invites a five-minute setting that thrashes the disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanInterval {
+    Hourly,
+    #[default]
+    SixHourly,
+    Daily,
+    Weekly,
+}
+
+impl ScanInterval {
+    /// Minutes between runs, which is the unit the scheduler wants.
+    pub fn minutes(self) -> u32 {
+        match self {
+            Self::Hourly => 60,
+            Self::SixHourly => 6 * 60,
+            Self::Daily => 24 * 60,
+            Self::Weekly => 7 * 24 * 60,
+        }
+    }
+}
+
+/// Background scanning (`background-scan.md`).
+///
+/// **Off by default, and nothing is registered with the system until the user
+/// turns it on.** A fresh install leaves no trace outside its own config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct BackgroundConfig {
+    /// The master switch. `false` on a fresh install - which is what the
+    /// derived default gives, and the reason it is derived rather than
+    /// written out: there is no value here anyone should be tempted to change.
+    pub enabled: bool,
+    /// Which volumes to keep scanned, by display name (`C:`). Empty means
+    /// nothing to do, which is the same as off.
+    pub volumes: Vec<String>,
+    pub interval: ScanInterval,
+}
+
+impl BackgroundConfig {
+    /// Whether there is actually anything for a background run to do.
+    /// Enabled with no volumes chosen is a switch that does nothing, and is
+    /// treated as off everywhere rather than registering an empty job.
+    pub fn is_active(&self) -> bool {
+        self.enabled && !self.volumes.is_empty()
     }
 }
 
@@ -266,6 +322,44 @@ mod tests {
         cfg.save_to(&path).unwrap();
         let loaded = Config::load_from(&path).unwrap();
         assert_eq!(loaded, cfg);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn background_scanning_is_off_on_a_fresh_install() {
+        let background = Config::default().background;
+        assert!(!background.enabled);
+        assert!(background.volumes.is_empty());
+        assert!(!background.is_active());
+    }
+
+    #[test]
+    fn a_switch_with_no_volumes_is_not_active() {
+        let mut background = BackgroundConfig {
+            enabled: true,
+            ..BackgroundConfig::default()
+        };
+        assert!(
+            !background.is_active(),
+            "nothing to scan is the same as off"
+        );
+        background.volumes.push("C:".to_string());
+        assert!(background.is_active());
+    }
+
+    #[test]
+    fn background_settings_round_trip() {
+        let path = tmp_path("background");
+        let cfg = Config {
+            background: BackgroundConfig {
+                enabled: true,
+                volumes: vec!["C:".to_string(), "D:".to_string()],
+                interval: ScanInterval::Daily,
+            },
+            ..Config::default()
+        };
+        cfg.save_to(&path).unwrap();
+        assert_eq!(Config::load_from(&path).unwrap(), cfg);
         let _ = fs::remove_file(&path);
     }
 
