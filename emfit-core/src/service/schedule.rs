@@ -76,15 +76,32 @@ pub fn unregister() -> Result<()> {
     }
 }
 
+/// `schtasks.exe`, invoked so that it draws nothing.
+///
+/// It is a console program and EmFit is not, so without `CREATE_NO_WINDOW`
+/// Windows gives it a console of its own - a black window that flashes up and
+/// vanishes on every call. `Stdio::null` alone does not prevent that: it
+/// silences the output, not the window.
+#[cfg(windows)]
+fn schtasks() -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    let mut command = std::process::Command::new("schtasks.exe");
+    command
+        .creation_flags(CREATE_NO_WINDOW.0)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
+}
+
 /// Whether the task is currently registered. Needs no elevation - querying is
 /// not a privileged operation.
 pub fn is_registered() -> bool {
     #[cfg(windows)]
     {
-        std::process::Command::new("schtasks.exe")
+        schtasks()
             .args(["/Query", "/TN", TASK_NAME])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
             .status()
             .is_ok_and(|status| status.success())
     }
@@ -102,10 +119,8 @@ pub fn is_registered() -> bool {
 pub fn run_now() -> Result<()> {
     #[cfg(windows)]
     {
-        let status = std::process::Command::new("schtasks.exe")
+        let status = schtasks()
             .args(["/Run", "/TN", TASK_NAME])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
             .status()
             .map_err(|source| Error::Io {
                 path: std::path::PathBuf::from("schtasks.exe"),
