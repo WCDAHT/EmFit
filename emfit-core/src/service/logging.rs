@@ -20,6 +20,14 @@
 //! logs in the terminal. Both layers share one [`EnvFilter`]; `RUST_LOG`
 //! overrides the default (STANDARDS sec 4.4: env vars for deployment knobs only).
 //!
+//! [`init`] also installs a **panic hook**, because without one a panic in a
+//! release build leaves nothing at all to work from: the bundle is built
+//! `panic = "abort"` and `windows_subsystem = "windows"`, so there is no
+//! unwind, no stderr, and the process is simply gone. Worse, a panic on a path
+//! that logs nothing - a row window, say - leaves a log whose last line is
+//! from minutes earlier and looks perfectly healthy. The hook writes the
+//! message, the source location, and a backtrace before the process dies.
+//!
 //! Call [`init`] once, as early as possible in the shell's `run()`. It is
 //! best-effort: if the log directory can't be created it falls back to
 //! stdout-only logging and the app still runs.
@@ -38,6 +46,10 @@ use crate::error::{Error, Result};
 
 /// Sub-directory of the OS data dir that holds log files.
 const LOG_DIR_NAME: &str = "logs";
+
+/// Where a panic is recorded a second time, in case the subscriber is the
+/// thing that is broken. Never rotated: it should stay empty.
+const PANIC_FILE_NAME: &str = "panic.log";
 
 /// Filename stem for the rolling log (the date and `.log` are appended).
 /// Per-app knob: set to your app's short name.
@@ -113,6 +125,7 @@ pub fn init() -> Result<PathBuf> {
                 .with(filter)
                 .with(stdout_layer)
                 .init();
+            install_panic_hook(None);
             tracing::warn!(error = %e, "logging: file logging unavailable; stdout only");
             return Err(e);
         }
@@ -134,6 +147,7 @@ pub fn init() -> Result<PathBuf> {
                 .with(filter)
                 .with(stdout_layer)
                 .init();
+            install_panic_hook(None);
             tracing::warn!(error = %e, dir = %dir.display(), "logging: could not open log file; stdout only");
             return Err(Error::Config {
                 message: format!("could not open log file in {}: {e}", dir.display()),
@@ -156,8 +170,82 @@ pub fn init() -> Result<PathBuf> {
         .with(file_layer)
         .init();
 
+    install_panic_hook(Some(dir.clone()));
     tracing::info!(log_dir = %dir.display(), "logging initialised");
     Ok(dir)
+}
+
+/// Record panics before the process goes, then let the default hook run.
+///
+/// `dir` is where a copy is appended, for the case where the tracing
+/// subscriber itself is what failed. Called by [`init`]; exposed for a binary
+/// that sets up its own logging.
+pub fn install_panic_hook(dir: Option<PathBuf>) {
+    let previous = std::panic::take_hook();
+
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|at| format!("{}:{}:{}", at.file(), at.line(), at.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_string();
+        let message = panic_message(info);
+
+        // Addresses only in a stripped release build, but the message and the
+        // location above are what actually identify the bug, and those survive
+        // stripping.
+        let backtrace = std::backtrace::Backtrace::force_capture();
+
+        tracing::error!(
+            panic = %message,
+            location = %location,
+            thread = %thread,
+            "PANIC - the process is about to abort"
+        );
+        tracing::error!("panic backtrace:\n{backtrace}");
+
+        if let Some(dir) = &dir {
+            let line = format!(
+                "{} PANIC in thread `{thread}` at {location}: {message}\n{backtrace}\n\n",
+                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3fZ"),
+            );
+            append(&dir.join(PANIC_FILE_NAME), &line);
+        }
+
+        previous(info);
+    }));
+}
+
+/// The panic payload as text. `panic!` produces either a `&str` or a
+/// `String`; anything else is a `panic_any` and only its type is knowable.
+fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
+    let payload = info.payload();
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = payload.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "a non-string panic payload".to_string()
+}
+
+/// Append to a file, ignoring failure. Called from a panic hook, where there
+/// is nothing useful to do about an error and raising one would replace the
+/// original panic with a less interesting one.
+fn append(path: &std::path::Path, text: &str) {
+    use std::io::Write;
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = file.write_all(text.as_bytes());
+        let _ = file.flush();
+    }
 }
 
 /// Resolve and create the log directory.
@@ -172,6 +260,39 @@ fn prepare_log_dir() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_panic_hook_writes_the_message_and_location() {
+        // The crash this exists for wrote nothing anywhere: a release build
+        // aborts without unwinding and has no stderr, and the panicking path
+        // logged nothing of its own.
+        let dir = std::env::temp_dir().join(format!("emfit-panic-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(super::PANIC_FILE_NAME);
+        let _ = std::fs::remove_file(&path);
+
+        super::install_panic_hook(Some(dir.clone()));
+        // Indexed through a runtime value, or the compiler refuses to build
+        // an index it can prove is out of bounds.
+        let caught = std::panic::catch_unwind(|| {
+            let empty: Vec<u32> = Vec::new();
+            let at = std::hint::black_box(0usize);
+            empty[at]
+        });
+        assert!(caught.is_err(), "the test panic must have happened");
+
+        let written = std::fs::read_to_string(&path).expect("the hook wrote a panic file");
+        assert!(
+            written.contains("index out of bounds"),
+            "the message has to survive: {written}"
+        );
+        assert!(
+            written.contains("logging.rs"),
+            "and so does where it happened: {written}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]
