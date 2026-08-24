@@ -30,15 +30,15 @@ use emfit_core::service::task::{CancellationToken, Progress};
 use emfit_core::service::treemap::TreemapOptions;
 use emfit_core::service::view::SortKey;
 use emfit_core::service::{
-    breakdown, elevation, presets, scan, schedule, search, tree, treemap, view, volume,
+    background, breakdown, elevation, presets, scan, schedule, search, tree, treemap, view, volume,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::dto::{
-    CacheUsageDto, DrillDto, FiltersDto, NodeInfoDto, RawQueryDto, RowWindowDto, ScanDoneDto,
-    ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto, SyntaxSectionDto, TreeRowDto,
-    TreemapRectDto, TypeRowDto, ViewUpdatedDto, VolumeDto,
+    BackgroundStatusDto, CacheUsageDto, DrillDto, FiltersDto, NodeInfoDto, RawQueryDto,
+    RowWindowDto, ScanDoneDto, ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto,
+    SyntaxSectionDto, TreeRowDto, TreemapRectDto, TypeRowDto, ViewUpdatedDto, VolumeDto,
 };
 use crate::error::{CommandError, CommandResult};
 use crate::state::{AppState, Cacheable, ScannedVolume};
@@ -836,11 +836,41 @@ pub fn sync_background_task(config: State<'_, Mutex<Config>>) -> CommandResult<b
     Ok(schedule::is_registered())
 }
 
-/// Whether the background-scan task is registered right now. Cheap, and needs
-/// no elevation - the dialog asks every time it opens.
+/// What the Background settings page reports: whether the task exists, and
+/// what the last run actually did.
+///
+/// The last-run time comes from EmFit's own record rather than from Task
+/// Scheduler. Not for want of asking it - `schtasks /Query` reports run times
+/// under localized column headings, so parsing them would work on an English
+/// Windows and quietly stop elsewhere. Our own record also says something
+/// more useful: that a scan *finished*, not merely that the task fired.
 #[tauri::command]
-pub fn background_task_registered() -> bool {
-    schedule::is_registered()
+pub fn background_status(config: State<'_, Mutex<Config>>) -> BackgroundStatusDto {
+    let interval = config.lock().unwrap().background.interval;
+    let last = background::last_run();
+
+    // Derived, and honestly approximate: Windows decides the real moment, and
+    // will skip a run on battery or while the machine is asleep.
+    let next_run = last
+        .as_ref()
+        .and_then(|run| run.next_due(interval))
+        .unwrap_or_default();
+
+    BackgroundStatusDto {
+        registered: schedule::is_registered(),
+        task_name: schedule::TASK_NAME.to_string(),
+        last_run: last.as_ref().map(|r| r.at.clone()).unwrap_or_default(),
+        last_result: last.map(|r| r.summary).unwrap_or_default(),
+        next_run,
+    }
+}
+
+/// Start the background scan now, rather than waiting for its interval.
+#[tauri::command]
+pub fn run_background_now() -> CommandResult<()> {
+    schedule::run_now()?;
+    tracing::info!("background: run requested from settings");
+    Ok(())
 }
 
 /// The query language, for the Search syntax dialog. Generated from the

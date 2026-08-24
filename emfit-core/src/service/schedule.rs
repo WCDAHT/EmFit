@@ -94,6 +94,41 @@ pub fn is_registered() -> bool {
     }
 }
 
+/// Start the task now, without waiting for its interval.
+///
+/// No elevation: starting a task you own is not privileged, and the task
+/// itself carries the elevated run level. Returns once Windows has accepted
+/// the request - the scan runs on its own after that.
+pub fn run_now() -> Result<()> {
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("schtasks.exe")
+            .args(["/Run", "/TN", TASK_NAME])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|source| Error::Io {
+                path: std::path::PathBuf::from("schtasks.exe"),
+                source,
+            })?;
+        if !status.success() {
+            return Err(Error::Config {
+                message: format!(
+                    "Windows would not start \"{TASK_NAME}\" (schtasks exited with {})",
+                    status.code().unwrap_or(-1)
+                ),
+            });
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        Err(Error::UnsupportedPlatform {
+            operation: "scheduled tasks".to_string(),
+        })
+    }
+}
+
 /// The logged-in account, as Task Scheduler wants it written.
 ///
 /// Read before elevating: after a UAC prompt the environment may belong to a

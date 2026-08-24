@@ -21,11 +21,13 @@
     clearCache,
     getConfig,
     setConfig,
+    backgroundStatus,
+    runBackgroundNow,
     syncBackgroundTask,
   } from "../ipc";
   import { session, queryChanged } from "../session.svelte";
   import { SIZE_UNITS, type SizeUnit } from "../format";
-  import type { ScanInterval } from "../types";
+  import type { BackgroundStatus, ScanInterval } from "../types";
 
   interface Props {
     open: boolean;
@@ -64,6 +66,9 @@
    *  on every Save would teach people to click through it. */
   let backgroundWas = $state("");
   let backgroundError = $state("");
+  let backgroundState = $state<BackgroundStatus | null>(null);
+  let runningNow = $state(false);
+  let ranNow = $state("");
   // What the cache holds, and what the last clear did. Read when the dialog
   // opens; clearing acts at once rather than waiting for Save, because it is
   // an action, not a setting.
@@ -88,6 +93,8 @@
         backgroundWas = JSON.stringify(cfg.background);
       });
       backgroundError = "";
+      ranNow = "";
+      void refreshBackgroundStatus();
       cleared = "";
       void refreshCacheUsage();
     }
@@ -115,6 +122,32 @@
       cleared = `Could not clear the cache: ${e}`;
     } finally {
       clearing = false;
+    }
+  }
+
+  async function refreshBackgroundStatus() {
+    backgroundState = await backgroundStatus();
+  }
+
+  /** RFC 3339 from Rust, rendered in the reader's own locale. */
+  function when(iso: string): string {
+    if (iso === "") return "never";
+    const at = new Date(iso);
+    return Number.isNaN(at.getTime()) ? iso : at.toLocaleString();
+  }
+
+  async function onRunNow() {
+    runningNow = true;
+    ranNow = "";
+    try {
+      await runBackgroundNow();
+      // The task starts a separate process; it will not have finished by the
+      // time this returns, so do not claim it has.
+      ranNow = "Started. It runs in the background - reopen this page to see the result.";
+    } catch (e) {
+      ranNow = `Could not start it: ${e}`;
+    } finally {
+      runningNow = false;
     }
   }
 
@@ -295,6 +328,32 @@
             {#if backgroundError}
               <p class="hint warn">{backgroundError}</p>
             {/if}
+
+            {#if backgroundState}
+              <div class="status">
+                <p class="hint">
+                  {backgroundState.registered
+                    ? `Registered with Windows as "${backgroundState.task_name}".`
+                    : "Not registered with Windows."}
+                </p>
+                {#if backgroundState.registered}
+                  <p class="hint">
+                    Last run: {when(backgroundState.last_run)}{backgroundState.last_result
+                      ? ` - ${backgroundState.last_result}`
+                      : ""}
+                  </p>
+                  {#if backgroundState.next_run}
+                    <p class="hint">Next run: about {when(backgroundState.next_run)}</p>
+                  {/if}
+                  <div class="row">
+                    <button class="btn" onclick={() => void onRunNow()} disabled={runningNow}>
+                      {runningNow ? "Starting..." : "Run now"}
+                    </button>
+                    {#if ranNow}<span class="hint">{ranNow}</span>{/if}
+                  </div>
+                {/if}
+              </div>
+            {/if}
             <p class="hint">
               Saving a change here asks Windows for permission, because it
               adds or removes a scheduled task. It is called "EmFit Background
@@ -468,6 +527,16 @@
   }
   .drives:disabled {
     opacity: 0.5;
+  }
+
+  .status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    background: var(--surface-sunken);
   }
   .drives legend {
     padding: 0 var(--space-2);

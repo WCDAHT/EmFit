@@ -321,6 +321,22 @@ impl From<Filters> for FiltersDto {
     }
 }
 
+/// What the Background settings page reports.
+#[derive(Serialize, Debug, Clone, Default)]
+pub struct BackgroundStatusDto {
+    /// Whether the scheduled task exists right now - the truth, not what the
+    /// config asked for.
+    pub registered: bool,
+    /// The task's name, so the dialog can name it and a user can find it.
+    pub task_name: String,
+    /// When the last background run finished, RFC 3339, or empty for never.
+    pub last_run: String,
+    /// That run's one-line outcome.
+    pub last_result: String,
+    /// Roughly when the next one is due, RFC 3339, or empty when unknown.
+    pub next_run: String,
+}
+
 /// One row of the search-syntax reference (`Search > Search syntax`).
 #[derive(Serialize, Debug, Clone)]
 pub struct SyntaxEntryDto {

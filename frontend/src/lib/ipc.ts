@@ -10,6 +10,7 @@ import type {
   CacheUsage,
   NodeInfoDto,
   NodeRef,
+  BackgroundStatus,
   FiltersDto,
   SyntaxSectionDto,
   RawQueryDto,
@@ -124,9 +125,14 @@ export function syncBackgroundTask(): Promise<boolean> {
   return invoke("sync_background_task");
 }
 
-/** Whether the background-scan task is registered right now. */
-export function backgroundTaskRegistered(): Promise<boolean> {
-  return invoke("background_task_registered");
+/** Whether the task exists, and what the last background run did. */
+export function backgroundStatus(): Promise<BackgroundStatus> {
+  return invoke("background_status");
+}
+
+/** Start the background scan now instead of waiting for its interval. */
+export function runBackgroundNow(): Promise<void> {
+  return invoke("run_background_now");
 }
 
 /** The query language, for the Search syntax dialog. */

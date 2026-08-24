@@ -195,6 +195,17 @@ export interface FiltersDto {
   problems: string[];
 }
 
+/** Mirror of `BackgroundStatusDto`: what the Background settings page shows. */
+export interface BackgroundStatus {
+  registered: boolean;
+  task_name: string;
+  /** RFC 3339, or "" for never. */
+  last_run: string;
+  last_result: string;
+  /** RFC 3339, or "" when unknown. */
+  next_run: string;
+}
+
 /** One row of the search-syntax reference. */
 export interface SyntaxEntryDto {
   token: string;

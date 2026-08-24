@@ -18,7 +18,9 @@
 //! - **Compete with the user.** A volume the app is scanning right now is
 //!   skipped, not waited for; the next interval will come round soon enough.
 
-use crate::error::Result;
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Error, Result};
 use crate::service::config::Config;
 use crate::service::lock::{self, ProcessLock};
 use crate::service::task::{CancellationToken, Progress};
@@ -63,6 +65,68 @@ impl RunSummary {
             self.failed.len()
         )
     }
+}
+
+/// What the last background run did, kept so the settings dialog can say
+/// whether this is working.
+///
+/// Written by the background process and read by the app, in a file of its
+/// own rather than in `config.toml`: the app holds the config in memory and
+/// writes it back whole, so a background run recording itself there would be
+/// erased by the next Save.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LastRun {
+    /// When it finished, RFC 3339 in UTC.
+    pub at: String,
+    /// The one-line outcome ([`RunSummary::summary`]).
+    pub summary: String,
+    pub scanned: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Where [`LastRun`] is kept - beside the cache, because it is state about
+/// scanning rather than a setting anyone edits.
+pub fn last_run_path() -> Result<std::path::PathBuf> {
+    Ok(cache::dir()?.join("last-background-run.json"))
+}
+
+/// What the last background run did, if there has been one.
+pub fn last_run() -> Option<LastRun> {
+    let path = last_run_path().ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+impl LastRun {
+    /// Roughly when the next run is due: this one plus the interval.
+    ///
+    /// Approximate on purpose, and worth saying so wherever it is shown:
+    /// Windows owns the real schedule and will skip a run on battery or while
+    /// the machine is asleep.
+    pub fn next_due(&self, interval: crate::service::config::ScanInterval) -> Option<String> {
+        let at = chrono::DateTime::parse_from_rfc3339(&self.at).ok()?;
+        let next = at.checked_add_signed(chrono::Duration::minutes(interval.minutes().into()))?;
+        Some(next.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+    }
+}
+
+fn record(summary: &RunSummary) -> Result<()> {
+    let record = LastRun {
+        at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        summary: summary.summary(),
+        scanned: summary.scanned.clone(),
+        failed: summary.failed.iter().map(|(v, _)| v.clone()).collect(),
+    };
+    let path = last_run_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&record)?)
+        .map_err(|source| Error::Io { path, source })
 }
 
 /// Run one background pass, per the saved config.
@@ -122,6 +186,12 @@ pub fn run(cancel: &CancellationToken) -> Result<RunSummary> {
         Ok(0) => {}
         Ok(n) => tracing::info!(evicted = n, "background: cache trimmed to budget"),
         Err(e) => tracing::warn!(error = %e, "background: could not trim the cache"),
+    }
+
+    // Recorded even when every volume failed: "it ran and got nowhere" is a
+    // far more useful thing for the settings dialog to say than silence.
+    if let Err(e) = record(&summary) {
+        tracing::warn!(error = %e, "background: could not record the run");
     }
 
     tracing::info!(result = %summary.summary(), "background: run finished");
