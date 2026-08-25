@@ -21,6 +21,9 @@ import type {
   TreeRowDto,
   TreemapRectDto,
   TypeRowDto,
+  UpdateApplied,
+  UpdateDownload,
+  UpdateStatus,
   VolumeDto,
 } from "./types";
 
@@ -133,6 +136,51 @@ export function backgroundStatus(): Promise<BackgroundStatus> {
 /** Start the background scan now instead of waiting for its interval. */
 export function runBackgroundNow(): Promise<void> {
   return invoke("run_background_now");
+}
+
+/** Ask the website whether a newer EmFit is published. Resolves with what the
+ *  check concluded; rejects when the site cannot be reached. */
+export function checkForUpdate(): Promise<UpdateStatus> {
+  return invoke("check_for_update");
+}
+
+/** Download the release the last {@link checkForUpdate} found. Progress
+ *  arrives as `update:progress` events; resolves with where the file landed. */
+export function downloadUpdate(): Promise<UpdateDownload> {
+  return invoke("download_update");
+}
+
+/** Install the downloaded release over the running one. Resolves with whether
+ *  it replaced itself, and if not, the sentence saying why. */
+export function applyUpdate(): Promise<UpdateApplied> {
+  return invoke("apply_update");
+}
+
+/** Restart into the version {@link applyUpdate} installed. This process exits,
+ *  so the promise never resolves. */
+export function restartForUpdate(): Promise<void> {
+  return invoke("restart_for_update");
+}
+
+/** Stop a download in flight. */
+export function cancelUpdateDownload(): Promise<void> {
+  return invoke("cancel_update_download");
+}
+
+/** Open Explorer with the downloaded file selected. */
+export function revealUpdate(): Promise<void> {
+  return invoke("reveal_update");
+}
+
+/** Run the downloaded release. EmFit stays open. */
+export function launchUpdate(): Promise<void> {
+  return invoke("launch_update");
+}
+
+/** Remember that this version was dismissed, so the startup check stays quiet
+ *  about it. Asking from the Help menu always answers. */
+export function skipUpdateVersion(version: string): Promise<void> {
+  return invoke("skip_update_version", { version });
 }
 
 /** The query language, for the Search syntax dialog. */

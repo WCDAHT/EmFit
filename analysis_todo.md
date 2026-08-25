@@ -93,6 +93,33 @@ goes stale.
   the frame would need a separate borderless always-on-top OS window -
   noted as not worth it for now.
 
+## Update checking (landed; open items)
+
+- [ ] **Publish a `sha256` per release in the site manifest.** `service::
+      update::verify` is written, tested, and inert: the field is parsed as
+      `Option<String>` and checking turns on the moment it is present, with
+      no code change. Until then a download is trusted on HTTPS alone, which
+      authenticates the host and not the bytes - and EmFit usually runs
+      elevated, so what it executes matters more than most.
+- [ ] **Authenticode-sign the release binary.** Closes the same gap from the
+      other side and stops SmartScreen warning users on a first run, which is
+      friction every option here otherwise carries.
+- [ ] EmFit is not in the manifest yet - `tests/release_manifest.rs` asserts
+      that on the real fixture, which is `https://wcdaht.github.io/manifest.json`
+      verbatim. When it is published, flip that test to assert the offer.
+- [ ] The in-place swap has unit tests over a temp directory (rename, copy,
+      and the restore when the copy fails) but has never run against a real
+      installed EmFit. Worth doing once by hand: install to a folder, update,
+      confirm the restart comes back as the new version and that the `.old`
+      file disappears on the start after that.
+- [ ] Blocked-install paths are equally untested by hand. The one that
+      matters is an install under Program Files without Administrator: the
+      dialog should keep the download and say to run elevated.
+- [ ] `ureq` reads proxy settings from the environment and validates against
+      the Windows certificate store (`platform-verifier`). If a site behind a
+      proxy that only WinINET knows about turns up, WinHTTP through the
+      `windows` crate is the fallback - no new dependency, more unsafe code.
+
 ## Notes / decisions worth remembering
 
 - ADS accounting: a stream's **allocated** bytes fold into its owner's

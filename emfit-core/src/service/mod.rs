@@ -25,6 +25,7 @@ pub mod syntax;
 pub mod task;
 pub mod tree;
 pub mod treemap;
+pub mod update;
 pub mod usn;
 pub mod values;
 pub mod view;

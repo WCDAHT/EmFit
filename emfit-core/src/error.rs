@@ -65,6 +65,13 @@ pub enum Error {
     #[error("cache file {path} is unusable: {reason}")]
     CacheInvalid { path: PathBuf, reason: String },
 
+    /// A network request failed: no route, a refused connection, a bad
+    /// certificate, an HTTP status, or a body that did not arrive whole.
+    /// Only `service::update` produces these - nothing else in the crate
+    /// talks to the network.
+    #[error("network request to {url} failed: {message}")]
+    Network { url: String, message: String },
+
     /// JSON (de)serialisation failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),

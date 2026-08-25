@@ -14,6 +14,7 @@ use emfit_core::service::syntax::SyntaxSection;
 use emfit_core::service::task::Progress;
 use emfit_core::service::tree::TreeRow;
 use emfit_core::service::treemap::TreemapRect;
+use emfit_core::service::update::UpdateStatus;
 use emfit_core::service::view::{Row, SelectionSummary, Sort, SortKey, human_size};
 use serde::{Deserialize, Serialize};
 
@@ -531,6 +532,75 @@ pub struct NodeInfoDto {
     pub allocated_display: String,
     pub files: u32,
     pub dirs: u32,
+}
+
+/// What a completed update check found (`service::update`).
+///
+/// The release URL and its checksum are deliberately *not* here. The webview
+/// never needs them, and the command that downloads reads them from the status
+/// the shell kept - so no page can talk the app into fetching a URL of its
+/// own choosing.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateStatusDto {
+    /// `up_to_date`, `available`, `ahead`, or `not_listed`.
+    pub state: String,
+    pub current: String,
+    /// The published version, as the manifest writes it (`v0.4.0`).
+    pub latest: String,
+    /// Publication date from the manifest, verbatim; empty when absent.
+    pub released_at: String,
+    /// Release notes as plain text. Rendered as text, never as markup: this
+    /// is remote content (STANDARDS sec 3.6).
+    pub notes: String,
+    /// What the download would be saved as.
+    pub file_name: String,
+    /// When this check ran, RFC 3339 in UTC.
+    pub checked_at: String,
+}
+
+impl UpdateStatusDto {
+    pub fn from_status(status: &UpdateStatus, checked_at: String) -> Self {
+        Self {
+            state: status.state.as_str().to_string(),
+            current: status.current.clone(),
+            latest: status.latest.clone(),
+            released_at: status.released_at.clone(),
+            notes: status.notes.clone(),
+            file_name: status.file_name.clone(),
+            checked_at,
+        }
+    }
+}
+
+/// One `update:progress` event while a release downloads.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateProgressDto {
+    pub done: u64,
+    /// Absent when the server sends no content length, which is what tells
+    /// the dialog to show an indeterminate bar.
+    pub total: Option<u64>,
+    /// Preformatted, so the dialog needs no unit logic of its own.
+    pub display: String,
+}
+
+/// Where a finished download landed.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateDownloadDto {
+    pub path: String,
+    pub file_name: String,
+}
+
+/// What installing the download did.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateAppliedDto {
+    /// True when the running executable was replaced and a restart is all
+    /// that is left.
+    pub replaced: bool,
+    /// When it was not: one sentence saying why, already fit to show. Empty
+    /// when `replaced`.
+    pub reason: String,
+    /// Where the download sits, so the fallback buttons still work.
+    pub path: String,
 }
 
 /// What the scan cache occupies on disk, for the settings dialog.

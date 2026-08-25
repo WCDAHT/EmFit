@@ -15,6 +15,7 @@
   import Settings from "./lib/components/Settings.svelte";
   import ShortcutsDialog from "./lib/components/ShortcutsDialog.svelte";
   import SyntaxDialog from "./lib/components/SyntaxDialog.svelte";
+  import UpdateDialog from "./lib/components/UpdateDialog.svelte";
   import ScanControls from "./lib/views/ScanControls.svelte";
   import ScanStatus from "./lib/views/ScanStatus.svelte";
   import SearchBar from "./lib/views/SearchBar.svelte";
@@ -22,7 +23,7 @@
   import TreeView from "./lib/views/TreeView.svelte";
   import StatusBar from "./lib/views/StatusBar.svelte";
   import { toggleThemeMode, syncThemeWithConfig } from "./lib/theme";
-  import { cancelScan, editFilters, getConfig, listVolumes } from "./lib/ipc";
+  import { cancelScan, checkForUpdate, editFilters, getConfig, listVolumes } from "./lib/ipc";
   import {
     session,
     hooks,
@@ -35,6 +36,7 @@
     ScanDoneEvent,
     ScanProgressEvent,
     UsnDeletedEvent,
+    UpdateStatus,
     UsnGapEvent,
     ViewUpdatedEvent,
   } from "./lib/types";
@@ -44,6 +46,10 @@
   let settingsOpen = $state(false);
   let shortcutsOpen = $state(false);
   let syntaxOpen = $state(false);
+  let updateOpen = $state(false);
+  /** What the startup check found, so opening the dialog does not repeat the
+   *  round trip it already made. */
+  let seededUpdate = $state<UpdateStatus | null>(null);
 
   onMount(() => {
     const unlisteners: Promise<UnlistenFn>[] = [
@@ -158,6 +164,11 @@
           case "shortcuts":
             shortcutsOpen = true;
             break;
+          case "check_update":
+            // Asking from the menu always answers, skipped version or not.
+            seededUpdate = null;
+            updateOpen = true;
+            break;
           case "about":
             aboutOpen = true;
             break;
@@ -176,12 +187,30 @@
         session.colorMode = cfg.treemap.color_mode === "extension" ? "extension" : "ranked";
         session.showFreeSpace = cfg.treemap.show_free_space ?? false;
       }
+      // The one check that is not a click, and only because the user turned it
+      // on. It stays silent unless there is something new to say: a failed
+      // check, an up-to-date answer, and a version already dismissed all pass
+      // without a dialog.
+      if (cfg.update?.check_on_start) void startupCheck(cfg.update.skipped_version);
     });
 
     return () => {
       for (const p of unlisteners) void p.then((unlisten) => unlisten());
     };
   });
+
+  async function startupCheck(skipped: string | null) {
+    try {
+      const status = await checkForUpdate();
+      if (status.state !== "available" || status.latest === skipped) return;
+      seededUpdate = status;
+      updateOpen = true;
+    } catch (e) {
+      // No network, no interruption. The Help menu is where someone who cares
+      // will ask, and it reports the failure there.
+      console.warn(`update check failed: ${e}`);
+    }
+  }
 
   function inTextInput(e: KeyboardEvent): boolean {
     const t = e.target as HTMLElement | null;
@@ -191,7 +220,7 @@
   // All app shortcuts, dispatched at the root (STANDARDS sec 3.7). Open dialogs
   // own their own Esc; global handling is suppressed while one is up.
   function onKeydown(e: KeyboardEvent) {
-    const dialogOpen = aboutOpen || shortcutsOpen || settingsOpen;
+    const dialogOpen = aboutOpen || shortcutsOpen || settingsOpen || updateOpen;
 
     if (e.key === "F1") {
       e.preventDefault();
@@ -268,9 +297,25 @@
 </main>
 
 <About open={aboutOpen} onClose={() => (aboutOpen = false)} />
-<Settings open={settingsOpen} onClose={() => (settingsOpen = false)} />
+<Settings
+  open={settingsOpen}
+  onClose={() => (settingsOpen = false)}
+  onCheckUpdatesRequested={() => {
+    settingsOpen = false;
+    seededUpdate = null;
+    updateOpen = true;
+  }}
+/>
 <ShortcutsDialog open={shortcutsOpen} onClose={() => (shortcutsOpen = false)} />
 <SyntaxDialog open={syntaxOpen} onClose={() => (syntaxOpen = false)} />
+<UpdateDialog
+  open={updateOpen}
+  seeded={seededUpdate}
+  onClose={() => {
+    updateOpen = false;
+    seededUpdate = null;
+  }}
+/>
 
 <style>
   main {

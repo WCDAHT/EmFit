@@ -32,13 +32,16 @@
   interface Props {
     open: boolean;
     onClose: () => void;
+    /** The Updates page asks; App owns the dialog and decides. */
+    onCheckUpdatesRequested?: () => void;
   }
-  let { open, onClose }: Props = $props();
+  let { open, onClose, onCheckUpdatesRequested }: Props = $props();
 
   const TABS = [
     { id: "general", label: "General" },
     { id: "treemap", label: "Treemap" },
     { id: "background", label: "Background" },
+    { id: "updates", label: "Updates" },
   ] as const;
 
   /** The intervals offered, and how each reads. Deliberately a short list -
@@ -66,6 +69,8 @@
    *  on every Save would teach people to click through it. */
   let backgroundWas = $state("");
   let backgroundError = $state("");
+  let updateOnStart = $state(false);
+  let updateLastChecked = $state("");
   let backgroundState = $state<BackgroundStatus | null>(null);
   let runningNow = $state(false);
   let ranNow = $state("");
@@ -91,6 +96,8 @@
         backgroundVolumes = [...cfg.background.volumes];
         backgroundInterval = cfg.background.interval;
         backgroundWas = JSON.stringify(cfg.background);
+        updateOnStart = cfg.update?.check_on_start ?? false;
+        updateLastChecked = cfg.update?.last_checked ?? "";
       });
       backgroundError = "";
       ranNow = "";
@@ -177,6 +184,9 @@
       volumes: backgroundVolumes,
       interval: backgroundInterval,
     };
+    // Only the opt-in is edited here; the rest of the block is written by the
+    // check itself and must survive the save.
+    config.update = { ...config.update, check_on_start: updateOnStart };
     await setConfig(config);
 
     // Only when something here moved: this is the one setting whose Save asks
@@ -386,6 +396,36 @@
               <input type="checkbox" bind:checked={showFreeSpace} />
               Show free space as a block
             </label>
+          {:else if tab === "updates"}
+            <label class="toggle">
+              <input type="checkbox" bind:checked={updateOnStart} />
+              Check for a new version when EmFit opens
+            </label>
+            <p class="hint">
+              Off unless you turn it on. With it on, EmFit asks the release
+              site once at startup and says nothing unless there is a newer
+              version than the one you are running. Only the version number
+              is sent.
+            </p>
+
+            <div class="row">
+              <button class="btn" onclick={() => onCheckUpdatesRequested?.()}>
+                Check now
+              </button>
+              <span class="hint">
+                {updateLastChecked
+                  ? `Last checked ${when(updateLastChecked)}.`
+                  : "Not checked yet."}
+              </span>
+            </div>
+
+            <p class="hint">
+              EmFit runs from a single file, so an update replaces that file
+              and restarts. If the folder EmFit runs from cannot be written to
+              - one under Program Files without Administrator, say - the
+              download is kept and you are told why. Nothing happens without
+              you asking.
+            </p>
           {/if}
         </div>
       </div>

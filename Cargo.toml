@@ -46,6 +46,17 @@ directories = "6"
 lz4_flex = { version = "0.11", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
 twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
 
+# Update checking (service::update): fetching the release manifest and the
+# binary it points at. Blocking API, which suits the worker thread the scan
+# and search code already use. `platform-verifier` validates against the
+# Windows certificate store rather than a set of roots baked into our binary,
+# so a machine behind a TLS-inspecting corporate proxy still connects.
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip"] }
+# Checksum for a downloaded release. The manifest carries no hash today, so
+# this verifies nothing yet; it is wired so that publishing a `sha256` field
+# turns checking on with no code change (service::update::verify).
+sha2 = "0.10"
+
 # --- Windows only ---
 # Volume discovery and elevation (`service::volume`, `service::elevation`).
 # Pulled in through a `[target.'cfg(windows)'.dependencies]` block, so the core

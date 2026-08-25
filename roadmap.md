@@ -244,6 +244,13 @@ assertion mode that re-rolls the whole index and compares.
 - Single-instance with re-focus; portable mode (config beside the executable) for the forensic use case.
 - Search history and saved searches.
 - Full CLI surface ([features.md](./features.md) sec 10) with stable exit codes; diagnostics behind `diag` - **strip the hardcoded record numbers** v1 baked into its `debug` command.
+- **Update checking** (`service::update`, [features.md](./features.md) sec 8) - EmFit finds itself by name in the release
+  site's shared manifest, compares versions, and offers the update. Only on a click, or on a startup check the user
+  opted into. EmFit ships as one portable executable, so installing replaces that file in place and restarts; where the
+  install directory refuses a write, the download stays staged and the blocker is reported to the user and the log.
+  *(Landed.)* Still open before `1.0.0`: a `sha256` per release in the site manifest, which turns on
+  the verification already wired in `service::update::verify`, and Authenticode signing so SmartScreen stops warning on
+  first run.
 - About panel surfacing bundled license texts (STANDARDS sec 5.6).
 - README brought current: screenshot, feature list, shortcut table (STANDARDS sec 5.3).
 

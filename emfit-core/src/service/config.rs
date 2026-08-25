@@ -85,6 +85,9 @@ pub struct Config {
     /// Keeping chosen volumes scanned in the background
     /// (`background-scan.md`). Off until the user asks for it.
     pub background: BackgroundConfig,
+
+    /// Checking the website for a newer release (`service::update`).
+    pub update: UpdateConfig,
     // --- add further settings here (window geometry, recent files, ...) ---
 }
 
@@ -100,8 +103,36 @@ impl Default for Config {
             // compresses to well under one.
             cache_budget_mb: 2048,
             background: BackgroundConfig::default(),
+            update: UpdateConfig::default(),
         }
     }
+}
+
+/// Update checking (`service::update`).
+///
+/// **Nothing here reaches the network unless the user acted.** The check runs
+/// from Help > Check for updates, or at startup only once
+/// [`check_on_start`](Self::check_on_start) has been switched on - which it is
+/// not on a fresh install.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct UpdateConfig {
+    /// Check once when the app opens. Off until the user opts in; the derived
+    /// default is what gives that.
+    pub check_on_start: bool,
+
+    /// A version the user dismissed. A startup check that finds this exact
+    /// version stays quiet; a later one is offered normally. Only startup
+    /// checks honour it - asking from the menu means asking.
+    pub skipped_version: Option<String>,
+
+    /// When the last check finished, RFC 3339 in UTC. Shown in Settings so
+    /// "it never checks" is answerable.
+    pub last_checked: Option<String>,
+
+    /// Override for the manifest URL, for testing against a staging site.
+    /// Empty or absent means [`crate::app::MANIFEST_URL`].
+    pub manifest_url: Option<String>,
 }
 
 /// How often the background scan runs. A fixed set rather than a free number:
@@ -355,6 +386,32 @@ mod tests {
                 enabled: true,
                 volumes: vec!["C:".to_string(), "D:".to_string()],
                 interval: ScanInterval::Daily,
+            },
+            ..Config::default()
+        };
+        cfg.save_to(&path).unwrap();
+        assert_eq!(Config::load_from(&path).unwrap(), cfg);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_checking_is_off_on_a_fresh_install() {
+        let update = Config::default().update;
+        assert!(!update.check_on_start);
+        assert_eq!(update.skipped_version, None);
+        assert_eq!(update.last_checked, None);
+        assert_eq!(update.manifest_url, None);
+    }
+
+    #[test]
+    fn update_settings_round_trip() {
+        let path = tmp_path("update");
+        let cfg = Config {
+            update: UpdateConfig {
+                check_on_start: true,
+                skipped_version: Some("v0.4.0".to_string()),
+                last_checked: Some("2026-08-24T10:00:00Z".to_string()),
+                manifest_url: Some("https://staging.example/manifest.json".to_string()),
             },
             ..Config::default()
         };

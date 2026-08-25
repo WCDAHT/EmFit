@@ -1,0 +1,44 @@
+{
+  "COMRADE": {
+    "version": "v0.8.0",
+    "released_at": "2026-06-30",
+    "original_filename": "comrade-windows-x64.exe",
+    "release_file": "content/COMRADE/comrade-windows-x64.exe",
+    "readme_file": "content/COMRADE/README.md"
+  },
+  "FENDER": {
+    "version": "v0.3.0",
+    "released_at": "2026-06-17",
+    "original_filename": "FENDER.v0.3.0.exe",
+    "release_file": "content/FENDER/FENDER.v0.3.0.exe",
+    "readme_file": "content/FENDER/README.md"
+  },
+  "Hashbrown": {
+    "version": "v0.2.0",
+    "released_at": "2026-07-22",
+    "original_filename": "HASHBROWN-windows-x64.exe",
+    "release_file": "content/Hashbrown/HASHBROWN-windows-x64.exe",
+    "readme_file": "content/Hashbrown/README.md"
+  },
+  "Message-Maestro": {
+    "version": "v0.8.2",
+    "released_at": "2026-07-22",
+    "original_filename": "message-maestro-windows-x64.exe",
+    "release_file": "content/Message-Maestro/message-maestro-windows-x64.exe",
+    "readme_file": "content/Message-Maestro/README.md"
+  },
+  "NppPlistView": {
+    "version": "v1.0.0",
+    "released_at": "2026-08-17",
+    "original_filename": "NppListView-v1.0.0.zip",
+    "release_file": "content/NppPlistView/NppListView-v1.0.0.zip",
+    "readme_file": "content/NppPlistView/README.md"
+  },
+  "Toast": {
+    "version": "v0.6.0",
+    "released_at": "2026-01-06",
+    "original_filename": "Toast_v0.6.0.zip",
+    "release_file": "content/Toast/Toast_v0.6.0.zip",
+    "readme_file": "content/Toast/README.md"
+  }
+}

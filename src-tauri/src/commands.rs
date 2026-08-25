@@ -30,7 +30,8 @@ use emfit_core::service::task::{CancellationToken, Progress};
 use emfit_core::service::treemap::TreemapOptions;
 use emfit_core::service::view::SortKey;
 use emfit_core::service::{
-    background, breakdown, elevation, presets, scan, schedule, search, tree, treemap, view, volume,
+    background, breakdown, elevation, presets, scan, schedule, search, tree, treemap, update, view,
+    volume,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -38,10 +39,11 @@ use tauri_plugin_opener::OpenerExt;
 use crate::dto::{
     BackgroundStatusDto, CacheUsageDto, DrillDto, FiltersDto, NodeInfoDto, RawQueryDto,
     RowWindowDto, ScanDoneDto, ScanProgressDto, ScanTargetDto, SelectionSummaryDto, SortDto,
-    SyntaxSectionDto, TreeRowDto, TreemapRectDto, TypeRowDto, ViewUpdatedDto, VolumeDto,
+    SyntaxSectionDto, TreeRowDto, TreemapRectDto, TypeRowDto, UpdateAppliedDto, UpdateDownloadDto,
+    UpdateProgressDto, UpdateStatusDto, ViewUpdatedDto, VolumeDto,
 };
 use crate::error::{CommandError, CommandResult};
-use crate::state::{AppState, Cacheable, ScannedVolume};
+use crate::state::{AppState, Cacheable, ScannedVolume, UpdateSlot};
 
 /// The most rows one window may request. The viewport shows a few dozen;
 /// anything larger is a bug or an attempt to ship the index across IPC.
@@ -876,6 +878,210 @@ pub fn background_status(config: State<'_, Mutex<Config>>) -> BackgroundStatusDt
 pub fn run_background_now() -> CommandResult<()> {
     schedule::run_now()?;
     tracing::info!("background: run requested from settings");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// update checking (service::update)
+// ---------------------------------------------------------------------------
+
+/// Ask the website whether a newer EmFit is published.
+///
+/// `async` because it is a network round trip: a plain command would run on
+/// the main thread and freeze the window for as long as the site takes to
+/// answer.
+///
+/// The full result is kept in [`UpdateSlot`] and only a summary crosses IPC -
+/// the download URL stays on this side, so [`download_update`] fetches what
+/// the manifest named and nothing else.
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> CommandResult<UpdateStatusDto> {
+    let config = app.state::<Mutex<Config>>().lock().unwrap().clone();
+
+    let status = tauri::async_runtime::spawn_blocking(move || update::check(&config))
+        .await
+        .map_err(|e| CommandError::Shell(format!("the update check did not finish: {e}")))??;
+
+    let checked_at = chrono::Utc::now().to_rfc3339();
+
+    // Remember when, so Settings can answer "does this ever actually check".
+    {
+        let config = app.state::<Mutex<Config>>();
+        let mut guard = config.lock().unwrap();
+        guard.update.last_checked = Some(checked_at.clone());
+        if let Err(e) = guard.save() {
+            tracing::warn!(error = %e, "update: could not record the check time");
+        }
+    }
+
+    let dto = UpdateStatusDto::from_status(&status, checked_at);
+    app.state::<Mutex<UpdateSlot>>().lock().unwrap().status = Some(status);
+    Ok(dto)
+}
+
+/// Download the release the last check found.
+///
+/// Progress arrives as `update:progress` events; the promise resolves with
+/// where the file landed. Cancelling resolves as an error, the same as any
+/// other failed download.
+#[tauri::command]
+pub async fn download_update(app: AppHandle) -> CommandResult<UpdateDownloadDto> {
+    let (status, cancel) = {
+        let slot = app.state::<Mutex<UpdateSlot>>();
+        let mut guard = slot.lock().unwrap();
+        if guard.downloading {
+            return Err(CommandError::Shell("a download is already running".into()));
+        }
+        let status = guard
+            .status
+            .clone()
+            .ok_or_else(|| CommandError::Shell("check for an update first".into()))?;
+        let cancel = CancellationToken::new();
+        guard.cancel = Some(cancel.clone());
+        guard.downloading = true;
+        (status, cancel)
+    };
+
+    let emitter = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let mut progress = |done: u64, total: Option<u64>| {
+            let display = match total {
+                Some(total) => format!("{} of {}", view::human_size(done), view::human_size(total)),
+                None => view::human_size(done),
+            };
+            let _ = emitter.emit(
+                "update:progress",
+                UpdateProgressDto {
+                    done,
+                    total,
+                    display,
+                },
+            );
+        };
+        update::download(&status, &mut progress, &cancel)
+    })
+    .await
+    .map_err(|e| CommandError::Shell(format!("the download did not finish: {e}")));
+
+    let slot = app.state::<Mutex<UpdateSlot>>();
+    let mut guard = slot.lock().unwrap();
+    guard.downloading = false;
+    guard.cancel = None;
+
+    let path = outcome??;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    tracing::info!(path = %path.display(), "update: staged");
+    guard.downloaded = Some(path.clone());
+
+    Ok(UpdateDownloadDto {
+        path: path.display().to_string(),
+        file_name,
+    })
+}
+
+/// Install the downloaded release over the running one.
+///
+/// EmFit is a single portable executable, so this replaces itself where it
+/// stands and reports that a restart is due. When the install directory will
+/// not take a write - `Program Files` without Administrator, read-only media -
+/// nothing is touched, the download stays staged, and the reason comes back as
+/// a sentence for the dialog. Either way the core has already logged it.
+#[tauri::command]
+pub fn apply_update(slot: State<'_, Mutex<UpdateSlot>>) -> CommandResult<UpdateAppliedDto> {
+    let path = slot
+        .lock()
+        .unwrap()
+        .downloaded
+        .clone()
+        .ok_or_else(|| CommandError::Shell("nothing has been downloaded".into()))?;
+
+    Ok(match update::apply::apply(&path)? {
+        update::apply::Applied::Replaced { exe } => {
+            slot.lock().unwrap().replaced = Some(exe);
+            UpdateAppliedDto {
+                replaced: true,
+                reason: String::new(),
+                path: path.display().to_string(),
+            }
+        }
+        update::apply::Applied::Blocked { blocker } => UpdateAppliedDto {
+            replaced: false,
+            reason: blocker.reason(),
+            path: path.display().to_string(),
+        },
+    })
+}
+
+/// Restart into the version [`apply_update`] just installed.
+///
+/// This process exits: the point is to stop running the executable that was
+/// replaced. Refused when no replacement has happened, so a restart is never
+/// something the webview can ask for on its own.
+#[tauri::command]
+pub fn restart_for_update(app: AppHandle, slot: State<'_, Mutex<UpdateSlot>>) -> CommandResult<()> {
+    let exe = slot.lock().unwrap().replaced.clone().ok_or_else(|| {
+        CommandError::Shell("there is no installed update to restart into".into())
+    })?;
+    update::apply::restart(&exe)?;
+    app.exit(0);
+    Ok(())
+}
+
+/// Stop a download in flight.
+#[tauri::command]
+pub fn cancel_update_download(slot: State<'_, Mutex<UpdateSlot>>) {
+    if let Some(cancel) = slot.lock().unwrap().cancel.take() {
+        cancel.cancel();
+        tracing::info!("update: download cancelled");
+    }
+}
+
+/// Open Explorer with the downloaded file selected.
+///
+/// The path comes from what the shell staged, never from the webview: this is
+/// the one place a page could otherwise point the file manager at anything on
+/// the disk.
+#[tauri::command]
+pub fn reveal_update(app: AppHandle, slot: State<'_, Mutex<UpdateSlot>>) -> CommandResult<()> {
+    let path = slot
+        .lock()
+        .unwrap()
+        .downloaded
+        .clone()
+        .ok_or_else(|| CommandError::Shell("nothing has been downloaded".into()))?;
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| CommandError::Shell(format!("could not show {}: {e}", path.display())))
+}
+
+/// Run the downloaded release.
+///
+/// EmFit stays open: two portable copies running at once is a state the user
+/// can see and close, and closing this one for them would be a surprise.
+#[tauri::command]
+pub fn launch_update(slot: State<'_, Mutex<UpdateSlot>>) -> CommandResult<()> {
+    let path = slot
+        .lock()
+        .unwrap()
+        .downloaded
+        .clone()
+        .ok_or_else(|| CommandError::Shell("nothing has been downloaded".into()))?;
+    update::apply::launch(&path)?;
+    Ok(())
+}
+
+/// Remember that the user dismissed this version, so the startup check stays
+/// quiet about it. A later version is offered normally, and asking from the
+/// Help menu always answers.
+#[tauri::command]
+pub fn skip_update_version(version: String, config: State<'_, Mutex<Config>>) -> CommandResult<()> {
+    let mut guard = config.lock().unwrap();
+    guard.update.skipped_version = Some(version.clone());
+    guard.save()?;
+    tracing::info!(version, "update: version skipped");
     Ok(())
 }
 

@@ -16,7 +16,7 @@ mod watch;
 use std::sync::Mutex;
 
 use emfit_core::service::task::CancellationToken;
-use emfit_core::service::{background, config::Config, logging, schedule};
+use emfit_core::service::{background, config::Config, logging, schedule, update};
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
@@ -61,6 +61,10 @@ pub fn run() {
         "app starting"
     );
 
+    // An update installed last run renamed the executable it replaced aside;
+    // it can only be deleted once that process is gone, which is now.
+    update::apply::clean_previous();
+
     // Load persisted settings once at startup; commands serve and mutate this
     // in-memory copy and write changes through to disk (STANDARDS sec 3.3/sec 4.4).
     let config: Mutex<Config> = Mutex::new(Config::load());
@@ -70,6 +74,10 @@ pub fn run() {
         // Scanned indexes and the current search view (state::AppState). The
         // Rust side owns truth; the webview projects it (STANDARDS sec 3.3).
         .manage(state::AppState::new())
+        // The last update check and the file it staged (state::UpdateSlot).
+        // Kept out of the webview so the download command fetches the URL the
+        // manifest named, not one a page supplies.
+        .manage(Mutex::new(state::UpdateSlot::default()))
         // Plugins expose capability-gated APIs to the webview. `opener` opens
         // URLs/paths in the OS default handler; `dialog` is the native
         // open/save file picker (replaces a hand-rolled chooser). Grant their
@@ -97,6 +105,8 @@ pub fn run() {
                 .build()?;
             let help = SubmenuBuilder::new(app, "Help")
                 .text("shortcuts", "Keyboard shortcuts\tF1")
+                .text("check_update", "Check for updates...")
+                .separator()
                 .text("about", "About EmFit")
                 .build()?;
             let menu = MenuBuilder::new(app)
@@ -132,6 +142,14 @@ pub fn run() {
             commands::list_presets,
             commands::search_syntax,
             commands::edit_filters,
+            commands::check_for_update,
+            commands::download_update,
+            commands::cancel_update_download,
+            commands::reveal_update,
+            commands::launch_update,
+            commands::skip_update_version,
+            commands::apply_update,
+            commands::restart_for_update,
             commands::sync_background_task,
             commands::background_status,
             commands::run_background_now,

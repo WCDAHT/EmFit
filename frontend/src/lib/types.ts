@@ -16,6 +16,19 @@ export interface AppConfig {
   /** Ceiling on the cache directory, in MiB. */
   cache_budget_mb: number;
   background: BackgroundConfig;
+  update: UpdateConfig;
+}
+
+/** Checking the website for a newer release. Nothing here reaches the network
+ *  unless the user acted: `check_on_start` is off on a fresh install. */
+export interface UpdateConfig {
+  check_on_start: boolean;
+  /** A version the user dismissed; only the startup check honours it. */
+  skipped_version: string | null;
+  /** RFC 3339, or null when it has never checked. */
+  last_checked: string | null;
+  /** Manifest URL override, for testing against a staging site. */
+  manifest_url: string | null;
 }
 
 /** How often the background scan runs. */
@@ -193,6 +206,53 @@ export interface FiltersDto {
   /** False when the built-in set is standing in. */
   from_file: boolean;
   problems: string[];
+}
+
+/** What an update check concluded. */
+export type UpdateState = "up_to_date" | "available" | "ahead" | "not_listed";
+
+/** Mirror of `UpdateStatusDto`. The release URL is deliberately absent: it
+ *  stays on the Rust side so the download command fetches what the manifest
+ *  named and nothing else. */
+export interface UpdateStatus {
+  state: UpdateState;
+  current: string;
+  /** As the manifest writes it, e.g. `v0.4.0`. Empty when not listed. */
+  latest: string;
+  /** Publication date from the manifest, verbatim; empty when absent. */
+  released_at: string;
+  /** Release notes as PLAIN TEXT. Remote content - render as text, never with
+   *  `{@html}` (STANDARDS sec 3.6). */
+  notes: string;
+  file_name: string;
+  /** RFC 3339, when this check ran. */
+  checked_at: string;
+}
+
+/** One `update:progress` event while a release downloads. */
+export interface UpdateProgressEvent {
+  done: number;
+  /** Null when the server sends no content length: show an indeterminate bar. */
+  total: number | null;
+  /** Preformatted, e.g. "12.4 MB of 38.1 MB". */
+  display: string;
+}
+
+/** Where a finished download landed. */
+export interface UpdateDownload {
+  path: string;
+  file_name: string;
+}
+
+/** What installing the download did. */
+export interface UpdateApplied {
+  /** True when the running executable was replaced; a restart is all that is
+   *  left. */
+  replaced: boolean;
+  /** When it was not: one sentence saying why, already fit to show. */
+  reason: string;
+  /** Where the download sits, so the fallback buttons still work. */
+  path: string;
 }
 
 /** Mirror of `BackgroundStatusDto`: what the Background settings page shows. */

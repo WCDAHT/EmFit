@@ -7,6 +7,7 @@
 //! search worker threads.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use std::time::Duration;
@@ -18,6 +19,7 @@ use emfit_core::service::fold::CaseFold;
 use emfit_core::service::query::RawQuery;
 use emfit_core::service::search::Hit;
 use emfit_core::service::task::CancellationToken;
+use emfit_core::service::update::UpdateStatus;
 use emfit_core::service::view::{Sort, SortKey, SortRanks};
 
 /// One volume the app has an index for.
@@ -101,6 +103,26 @@ pub struct Inner {
     /// ordering, and merging two volumes' orders costs what building them did
     /// (`caching.md` sec 7).
     pub cached_orders: Option<(String, HashMap<SortKey, Vec<u32>>)>,
+}
+
+/// The update check's own small piece of state, managed separately from the
+/// index (`commands::check_for_update`).
+///
+/// The full [`UpdateStatus`] is kept here rather than handed to the webview,
+/// so the download command reads the release URL from what the *manifest*
+/// said, not from what the page asks for.
+#[derive(Default)]
+pub struct UpdateSlot {
+    /// The last completed check.
+    pub status: Option<UpdateStatus>,
+    /// Where the last successful download landed, for "show" and "run".
+    pub downloaded: Option<PathBuf>,
+    /// The executable an applied update replaced, once it has. Present is
+    /// what makes a restart legal to ask for.
+    pub replaced: Option<PathBuf>,
+    /// Cancels a download in flight.
+    pub cancel: Option<CancellationToken>,
+    pub downloading: bool,
 }
 
 pub struct AppState {

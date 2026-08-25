@@ -50,6 +50,16 @@ to Svelte/CSS hot-reload, edits to Rust trigger a recompile.
   opening the app shows a scanned index instead of starting one. Turning it
   off removes the task, and it can also be deleted from Task Scheduler
   directly. It runs as you, only while you are logged in, and not on battery.
+- **Updates**, only when you ask. **Help > Check for updates** looks EmFit
+  up in the release site's manifest and says whether a newer version is out,
+  with that release's notes. EmFit is a single file, so installing means
+  replacing that file: it downloads, swaps itself, and offers a restart. If
+  the folder it runs from will not take a write - under Program Files
+  without Administrator, on read-only media - nothing is touched, the
+  download is kept, and the dialog says which of those it was and what to
+  do; the same reason goes to the log. A once-at-startup check can be
+  switched on under Settings > Updates - off on a fresh install, quiet when
+  there is nothing new, and silent when the site cannot be reached.
 - **Case folding the volume's way** - name matching uses the volume's own
   NTFS `$Upcase` table, not a global rule.
 - **Honest accounting**: hard links are listed under every name but their

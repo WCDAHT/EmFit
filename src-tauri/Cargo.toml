@@ -32,6 +32,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 directories = { workspace = true }
+# Timestamping the last update check (commands::check_for_update).
+chrono = { workspace = true }
 # A dedicated small thread pool for the sort-rank warmer, so its heavy
 # background sorts never contend with interactive sorts on rayon's global
 # pool (a warm-up build was observed stretching a 20 ms rank sort to ~1 s).
