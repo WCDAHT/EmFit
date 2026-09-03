@@ -21,6 +21,7 @@ pub mod replay;
 pub mod scan;
 pub mod schedule;
 pub mod search;
+pub mod shortcut;
 pub mod syntax;
 pub mod task;
 pub mod tree;

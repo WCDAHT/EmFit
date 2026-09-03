@@ -16,7 +16,7 @@ mod watch;
 use std::sync::Mutex;
 
 use emfit_core::service::task::CancellationToken;
-use emfit_core::service::{background, config::Config, logging, schedule, update};
+use emfit_core::service::{background, config::Config, logging, schedule, shortcut, update};
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
 
@@ -42,6 +42,38 @@ fn run_background_scan() -> i32 {
     }
 }
 
+/// Keep the Start Menu entry pointing at this executable.
+///
+/// On its own thread and never waited on: EmFit is portable, so the shortcut
+/// has to be checked on every launch rather than written once by an installer,
+/// and none of that is worth a millisecond of the user's window appearing.
+/// Every failure is cosmetic - the user has no Start Menu entry, which is the
+/// state they were already in - so nothing here is worth interrupting a launch
+/// over, and the outcome only goes to the log.
+fn keep_start_menu_shortcut() {
+    let Ok(exe) = std::env::current_exe() else {
+        tracing::debug!("shortcut: cannot locate this executable; leaving the Start Menu alone");
+        return;
+    };
+    std::thread::spawn(move || match shortcut::ensure(&exe) {
+        Ok(shortcut::Outcome::Current) => {
+            tracing::debug!("shortcut: the Start Menu entry already points here");
+        }
+        Ok(shortcut::Outcome::Created(link)) => {
+            tracing::info!(link = %link.display(), "shortcut: Start Menu entry created");
+        }
+        Ok(shortcut::Outcome::Retargeted { link, was }) => {
+            tracing::info!(
+                link = %link.display(),
+                was = %was.display(),
+                now = %exe.display(),
+                "shortcut: Start Menu entry pointed elsewhere and was updated"
+            );
+        }
+        Err(e) => tracing::warn!(error = %e, "shortcut: could not update the Start Menu entry"),
+    });
+}
+
 pub fn run() {
     // STANDARDS sec 4.2: tracing from day one, into a detailed plain-text log file
     // under appdata (see `emfit_core::service::logging`). Best-effort - falls
@@ -64,6 +96,8 @@ pub fn run() {
     // An update installed last run renamed the executable it replaced aside;
     // it can only be deleted once that process is gone, which is now.
     update::apply::clean_previous();
+
+    keep_start_menu_shortcut();
 
     // Load persisted settings once at startup; commands serve and mutate this
     // in-memory copy and write changes through to disk (STANDARDS sec 3.3/sec 4.4).
