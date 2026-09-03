@@ -38,6 +38,7 @@ use crate::service::fold::CaseFold;
 use crate::service::replay;
 use crate::service::task::{CancellationToken, Progress};
 use crate::service::usn;
+use crate::service::view;
 
 /// The synthetic id the free-space row is pushed under. All ones - no real
 /// MFT record can collide (record numbers are 48-bit) and no hard-link alias
@@ -334,9 +335,16 @@ fn from_cache(
         Some(nodes as u64),
     ));
     let caps = ntfs_caps(volume.root_label());
-    let (index, warnings, rebuilt) =
+    let (index, warnings, rebuilt, remap) =
         cache::snapshot::rebuild(&loaded.columns, caps, &patch, cancel)?;
     progress(Progress::Finished);
+
+    // The rebuild renumbered the nodes, so the orders the snapshot carried
+    // address the wrong rows until they are translated and the new nodes are
+    // placed. Doing it here rather than letting the app warm from scratch is
+    // the difference between a cached load opening sorted and a cached load
+    // spending seven seconds on the Path column first.
+    let orders = repair_orders(&loaded.columns, &patch, &index, loaded.orders, &remap);
 
     let root = index.node(index.root());
     let stats = ScanStats {
@@ -375,9 +383,71 @@ fn from_cache(
         source: OutcomeSource::Cached {
             age: loaded.manifest.scan.age(),
             replay: replayed,
-            orders: loaded.orders,
+            orders,
         },
     }))
+}
+
+/// Bring the sort orders a snapshot carried onto the index that was rebuilt
+/// from it.
+///
+/// Best-effort per column: one that cannot be repaired is simply left out, and
+/// the app warms it the ordinary way. Costs two linear passes plus a binary
+/// search per placed node ([`view::repair_order`]), so it is milliseconds
+/// where rebuilding the Path column is seconds.
+fn repair_orders(
+    columns: &cache::snapshot::Columns,
+    patch: &cache::Patch,
+    index: &Index,
+    orders: std::collections::HashMap<view::SortKey, Vec<u32>>,
+    remap: &[u32],
+) -> std::collections::HashMap<view::SortKey, Vec<u32>> {
+    if orders.is_empty() {
+        return orders;
+    }
+    let started = Instant::now();
+
+    // Only the Path column cares. Every other key is a property of the node
+    // itself, and a patch replaces every node it touches.
+    let damage = cache::snapshot::path_damage(columns, patch);
+    let paths_repairable = damage.repairable(columns.len());
+    if damage.moved > 0 {
+        tracing::info!(
+            directories = damage.moved,
+            stranded = damage.stranded.len(),
+            repairable = paths_repairable,
+            sample = ?damage.sample,
+            "cache: directories moved, so nodes under them have to be placed again"
+        );
+    }
+
+    let mut repaired = std::collections::HashMap::with_capacity(orders.len());
+    for (key, order) in orders {
+        let displaced: &[u32] = match key {
+            view::SortKey::Path if !paths_repairable => {
+                tracing::info!(
+                    stranded = damage.stranded.len(),
+                    "cache: too much of the tree moved; the path order has to be warmed"
+                );
+                continue;
+            }
+            view::SortKey::Path => &damage.stranded,
+            _ => &[],
+        };
+        match view::repair_order(index, key, &order, remap, displaced) {
+            Some(fixed) => {
+                repaired.insert(key, fixed);
+            }
+            None => tracing::warn!(?key, "cache: the stored order does not fit this snapshot"),
+        }
+    }
+
+    tracing::info!(
+        columns = repaired.len(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "cache: sort orders repaired onto the rebuilt index"
+    );
+    repaired
 }
 
 /// Scan an NTFS filesystem inside a disk image file.

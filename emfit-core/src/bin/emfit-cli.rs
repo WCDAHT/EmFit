@@ -35,6 +35,7 @@ Usage:
   emfit-cli tree-size (--drive C | --image FILE) [--depth N] [--top N]
   emfit-cli cache     list | verify | clear
   emfit-cli cache     replay --drive C   [--find TEXT] [--top N]
+  emfit-cli cache     repair --drive C   [--top N]
 
 Scanning a drive uses its cached snapshot and replays the change journal onto
 it when it can (caching.md); --no-cache forces a real sweep, --save-cache
@@ -375,6 +376,7 @@ fn cmd_cache(args: &CliArgs) -> Result<()> {
             Ok(())
         }
         Some("replay") => cmd_cache_replay(args),
+        Some("repair") => cmd_cache_repair(args),
         Some("clear") => {
             let removed = cache::clear()?;
             println!("removed {removed} snapshot(s)");
@@ -535,6 +537,263 @@ fn cmd_cache_replay(args: &CliArgs) -> Result<()> {
     Ok(())
 }
 
+/// `cache repair --drive C`: prove the order repair against the real volume.
+///
+/// Replays the journal for real, rebuilds under the patch, then for every
+/// cached column does the same job twice - repair the stored order, and build
+/// the order from scratch - and says whether the two agree and what each cost.
+/// Writes nothing, so it is safe to run on a live drive as often as you like.
+///
+/// Agreement is the whole claim. A repair that is merely *fast* and produces a
+/// different order than a rebuild would is a view that sorts by the wrong
+/// thing, which is worse than a slow one.
+fn cmd_cache_repair(args: &CliArgs) -> Result<()> {
+    let letter = args
+        .drive
+        .ok_or_else(|| usage_err("cache repair needs --drive C".to_string()))?;
+    let volume = find_volume(letter)?;
+    let stamp = cache::VolumeStamp::of(&volume);
+
+    let Some(loaded) = cache::load(&stamp)? else {
+        println!("no cached scan for {}", volume.display_name());
+        return Ok(());
+    };
+    println!(
+        "snapshot: {} nodes, {} of {} columns cached, taken {} ago",
+        loaded.columns.len(),
+        loaded.orders.len(),
+        cache::CACHED_ORDERS.len(),
+        format_age(loaded.manifest.scan.age())
+    );
+    if loaded.orders.is_empty() {
+        println!("no sort orders stored yet - open the app once and let it warm them");
+        return Ok(());
+    }
+    let cancel = CancellationToken::new();
+
+    // The real journal when the volume can be opened, and a stand-in when it
+    // cannot. Reading the journal needs Administrator, and the timings are
+    // worth having either way - the repair does not care where the patch came
+    // from, only what is in it.
+    let patch = match live_patch(&volume, letter, &loaded, &cancel) {
+        Ok(Some(patch)) => patch,
+        Ok(None) => return Ok(()),
+        Err(e) => {
+            println!("cannot read the journal ({e}); simulating instead");
+            simulated_patch(&loaded.columns, args.top.max(1) * 100)
+        }
+    };
+
+    let started = Instant::now();
+    let damage = cache::snapshot::path_damage(&loaded.columns, &patch);
+    let paths_repairable = damage.repairable(loaded.columns.len());
+    let damage_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let started = Instant::now();
+    let (index, _, rebuilt, remap) = cache::snapshot::rebuild(
+        &loaded.columns,
+        loaded.manifest.caps.clone(),
+        &patch,
+        &cancel,
+    )?;
+    println!(
+        "rebuild:  {} kept, {} dropped, {} added, in {:.0} ms",
+        rebuilt.kept,
+        rebuilt.dropped,
+        rebuilt.added,
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    if damage.moved == 0 {
+        println!("paths:    no directory moved, in {damage_ms:.0} ms");
+    } else {
+        println!(
+            "paths:    {} directories moved, stranding {} of {} nodes ({:.2}%), in {:.0} ms",
+            damage.moved,
+            damage.stranded.len(),
+            loaded.columns.len(),
+            100.0 * damage.stranded.len() as f64 / loaded.columns.len() as f64,
+            damage_ms
+        );
+        println!("          {}", damage.sample.join(", "));
+        if !paths_repairable {
+            println!("          too much of the tree to be worth repairing");
+        }
+    }
+
+    println!("\nColumn      repair    rebuild   speedup  agrees");
+    let mut all_agree = true;
+    for &key in cache::CACHED_ORDERS.iter() {
+        let Some(stored) = loaded.orders.get(&key) else {
+            println!(
+                "{:<10}  {:>8}   {:>8}   {:>7}  not cached",
+                format!("{key:?}"),
+                "-",
+                "-",
+                "-"
+            );
+            continue;
+        };
+        let displaced: &[u32] = match key {
+            view::SortKey::Path if !paths_repairable => {
+                println!(
+                    "{:<10}  {:>8}   {:>8}   {:>7}  refused (too much moved)",
+                    format!("{key:?}"),
+                    "-",
+                    "-",
+                    "-"
+                );
+                continue;
+            }
+            view::SortKey::Path => &damage.stranded,
+            _ => &[],
+        };
+
+        let started = Instant::now();
+        let repaired = view::repair_order(&index, key, stored, &remap, displaced);
+        let repair_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        let started = Instant::now();
+        let fresh = view::build_order(&index, key);
+        let build_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        let verdict = match &repaired {
+            None => {
+                all_agree = false;
+                "REFUSED".to_string()
+            }
+            Some(order) if *order == fresh => "yes".to_string(),
+            Some(order) => {
+                all_agree = false;
+                let wrong = order
+                    .iter()
+                    .zip(&fresh)
+                    .enumerate()
+                    .find(|(_, (a, b))| a != b)
+                    .map(|(at, _)| at);
+                format!("NO (first differs at {wrong:?})")
+            }
+        };
+        println!(
+            "{:<10}  {:>7.0}ms  {:>7.0}ms   {:>6.0}x  {verdict}",
+            format!("{key:?}"),
+            repair_ms,
+            build_ms,
+            if repair_ms > 0.0 {
+                build_ms / repair_ms
+            } else {
+                0.0
+            }
+        );
+    }
+
+    println!();
+    if all_agree {
+        println!("every repaired column is the order a rebuild would have produced");
+    } else {
+        println!("MISMATCH - a repaired column disagrees with a rebuild; do not ship this");
+    }
+    Ok(())
+}
+
+/// The journal's own patch, when the volume can be opened. `Ok(None)` means
+/// there is nothing to report and the caller should stop.
+fn live_patch(
+    volume: &VolumeInfo,
+    letter: char,
+    loaded: &cache::Loaded,
+    cancel: &CancellationToken,
+) -> Result<Option<cache::Patch>> {
+    let Some(journal) = loaded.manifest.journal else {
+        println!("it recorded no journal position, so it cannot be replayed");
+        return Ok(None);
+    };
+    let (source, _) = scan::open_volume_source(volume, scan::ScanMode::Auto)?;
+    let layout = bootstrap::probe(&source)?;
+
+    Ok(
+        match replay::replay(letter, &layout, journal, loaded.columns.len(), cancel)? {
+            replay::Replay::Blocked(reason) => {
+                println!("cannot replay: {}", reason.explain());
+                None
+            }
+            replay::Replay::Unchanged { .. } => {
+                println!("journal: nothing has changed since the snapshot was taken");
+                Some(cache::Patch::default())
+            }
+            replay::Replay::Changed { patch, stats, .. } => {
+                println!(
+                    "journal: {} events over {} records",
+                    stats.events, stats.records
+                );
+                Some(patch)
+            }
+        },
+    )
+}
+
+/// A patch the shape a journal replay produces, invented from the snapshot.
+///
+/// For measuring, and for checking the repair on a machine where the journal
+/// cannot be read. Spread across the whole id range rather than clustered, so
+/// the renumbering it forces is the worst case rather than a tail-end shuffle:
+/// a third of the records are deleted outright, a third come back renamed, and
+/// a third are brand new files.
+fn simulated_patch(columns: &cache::Columns, records: usize) -> cache::Patch {
+    let n = columns.len();
+    let mut patch = cache::Patch::default();
+    if n < 16 {
+        return patch;
+    }
+
+    let stride = (n / records.max(1)).max(1);
+    let mut fresh_id = u64::MAX / 2;
+    for (turn, at) in (0..n).step_by(stride).enumerate() {
+        let fs_id = columns.fs_ids[at];
+        let flags = emfit_core::model::entry::EntryFlags::from_bits(columns.flags[at]);
+        if flags.is_directory() || flags.is_synthetic() || fs_id == 0 {
+            continue; // a moved directory is its own case; leave the tree alone
+        }
+        patch.replace.insert(fs_id & FS_OBJECT_MASK);
+        if turn % 3 != 0 {
+            // Back under a new name, which is what makes the column move
+            // rather than merely renumber.
+            patch.entries.push(emfit_core::model::sink::RecordedEntry {
+                fs_id,
+                parent_id: columns.fs_ids[columns.parents[at] as usize],
+                name: format!("repaired-{turn:07}.tmp"),
+                size: columns.sizes[at],
+                allocated: columns.allocated[at],
+                times: emfit_core::model::entry::Times {
+                    mtime: columns.mtimes[at],
+                    crtime: columns.crtimes[at],
+                },
+                flags,
+            });
+        }
+        if turn % 3 == 1 {
+            fresh_id += 1;
+            patch.entries.push(emfit_core::model::sink::RecordedEntry {
+                fs_id: fresh_id,
+                parent_id: columns.fs_ids[columns.parents[at] as usize],
+                name: format!("brand-new-{turn:07}.tmp"),
+                size: 4096,
+                allocated: 4096,
+                times: emfit_core::model::entry::Times {
+                    mtime: columns.mtimes[at],
+                    crtime: columns.crtimes[at],
+                },
+                flags: emfit_core::model::entry::EntryFlags::empty(),
+            });
+        }
+    }
+    println!(
+        "simulated: {} records replaced, {} entries back",
+        patch.replace.len(),
+        patch.entries.len()
+    );
+    patch
+}
+
 /// The full path of one node in a loaded snapshot, its own name included.
 ///
 /// A snapshot is columns, not an `Index`, so there is no `path()` to call -
@@ -583,7 +842,7 @@ fn verify_snapshot(entry: &cache::Entry) -> Result<()> {
     let read = started.elapsed();
 
     let started = Instant::now();
-    let (index, warnings, stats) = cache::snapshot::rebuild(
+    let (index, warnings, stats, _remap) = cache::snapshot::rebuild(
         &loaded.columns,
         loaded.manifest.caps.clone(),
         &cache::Patch::default(),

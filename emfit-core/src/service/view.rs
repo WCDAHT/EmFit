@@ -199,6 +199,190 @@ pub fn sort_by_ranks(hits: &mut [Hit], ranks: &SortRanks, ascending: bool) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// incremental repair
+// ---------------------------------------------------------------------------
+
+/// The place in a [`Remap`] of a node the rebuild did not carry over.
+pub const REMOVED: u32 = u32::MAX;
+
+/// Where each of a snapshot's nodes ended up after a rebuild:
+/// `remap[old_id] = new_id`, or [`REMOVED`] for one the patch dropped.
+///
+/// A rebuild renumbers: it pushes the survivors in their old order skipping
+/// the dropped ones, so every id after the first deletion shifts down. That is
+/// what made a cached order unusable on a patched snapshot - it addressed rows
+/// that had moved - and this is the translation that makes it usable again.
+pub type Remap = [u32];
+
+/// The primary key of a sort column, in whatever type that column sorts by.
+///
+/// Only ever compared against another key of the same column, so the variant
+/// ordering that `Ord` derives is never reached.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Primary {
+    Text(String),
+    Kind(FileKind),
+    Bytes(u64),
+    Time(i64),
+}
+
+/// One node's place under one sort column, as a *total* order.
+///
+/// Two things this has to get right, both of them ways a repair could quietly
+/// diverge from a rebuild:
+///
+/// - It derives exactly the keys [`sort_hits`] derives. Any drift between the
+///   two and a repaired order would sort by something subtly different from
+///   the column it claims to be.
+/// - Ties break by node id, which is what a stable sort over ascending ids
+///   already does. Without that a new node could be seated on either side of
+///   an equal one, and the Size column of a volume with ten thousand empty
+///   files is nothing but ties.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct OrderKey {
+    primary: Primary,
+    secondary: String,
+    id: u32,
+}
+
+/// The sort key of one node, matching [`sort_hits`] arm for arm.
+fn order_key(index: &Index, key: SortKey, id: u32) -> OrderKey {
+    let fold = CaseFold::Simple;
+    let folded = |s: &str| -> String { s.chars().map(|c| fold.fold(c)).collect() };
+    let node_id = crate::model::index::NodeId::new(id);
+    let name = index.name(node_id);
+    let hit = (0u16, node_id);
+
+    let (primary, secondary) = match key {
+        SortKey::Name => (Primary::Text(folded(name)), String::new()),
+        // Folding the path and comparing the results orders identically to
+        // `fold.cmp` on the raw paths, which is what the Path arm of
+        // `sort_hits` uses (code-point order == UTF-8 byte order).
+        SortKey::Path => (Primary::Text(folded(&index.path(node_id))), String::new()),
+        SortKey::Extension => (Primary::Text(folded(extension_of(name))), folded(name)),
+        SortKey::Kind => (
+            Primary::Kind(FileKind::classify(name, index.node(node_id).is_directory())),
+            folded(name),
+        ),
+        SortKey::Size => (Primary::Bytes(effective_size(&[index], hit)), String::new()),
+        SortKey::Allocated => (
+            Primary::Bytes(effective_allocated(&[index], hit)),
+            String::new(),
+        ),
+        SortKey::Modified => (
+            Primary::Time(index.node(node_id).times().mtime),
+            String::new(),
+        ),
+    };
+    OrderKey {
+        primary,
+        secondary,
+        id,
+    }
+}
+
+/// Bring a cached order up to date instead of rebuilding it.
+///
+/// The point of the whole exercise: rebuilding the `Path` column of a
+/// three-million-node volume costs about 7.2 s of string work, and a replay
+/// that touched two hundred files has not changed the answer for the other
+/// 2,999,800. So the survivors are carried across unchanged and only the new
+/// nodes are placed.
+///
+/// With `n` nodes, `f` to place and `C` the cost of deriving one key
+/// (O(depth) for `Path`, O(1) for `Size`):
+///
+/// - carrying the survivors over is one pass, O(n), and derives **no keys**;
+/// - placing them is `f log f + f log n` key comparisons - about 22 per node
+///   at three million, against the `n log n` a rebuild pays;
+/// - splicing them in is one pass, O(n + f), with no comparisons in it at all,
+///   because a binary search already said where each one goes.
+///
+/// `displaced` names snapshot nodes that survived but whose key changed anyway,
+/// so they have to be lifted out of the order and placed again. Only the Path
+/// column ever has any: a node's own name, size and times are safe by
+/// construction, since a patch replaces every node it touches, but a path is
+/// assembled from ancestors and moving a directory moves every descendant
+/// without the journal ever mentioning them. `snapshot::path_damage` is what
+/// finds them; pass an empty slice for every other column.
+///
+/// `Some` only when `remap` describes the snapshot `old_order` came from and
+/// the result addresses `index` exactly; `None` says warm the column the
+/// ordinary way rather than trust a mismatch.
+pub fn repair_order(
+    index: &Index,
+    key: SortKey,
+    old_order: &[u32],
+    remap: &Remap,
+    displaced: &[u32],
+) -> Option<Vec<u32>> {
+    if old_order.len() != remap.len() {
+        return None; // this order did not come from the snapshot that was rebuilt
+    }
+    let n = index.len();
+
+    let mut lifted = vec![false; remap.len()];
+    for &old in displaced {
+        *lifted.get_mut(old as usize)? = true;
+    }
+
+    // Pass 1 - carry the survivors over, in the order they were already in.
+    // Renumbering is a compaction, so it preserves relative order, and a
+    // survivor's key did not change; the result is still sorted.
+    let mut kept: Vec<u32> = Vec::with_capacity(n);
+    let mut covered = vec![false; n];
+    for &old in old_order {
+        let new = *remap.get(old as usize)?;
+        if new == REMOVED || lifted[old as usize] {
+            continue;
+        }
+        let slot = covered.get_mut(new as usize)?;
+        if *slot {
+            return None; // two old nodes claiming one new one
+        }
+        *slot = true;
+        kept.push(new);
+    }
+
+    // Pass 2 - whatever the old order no longer accounts for: the patch's own
+    // entries, anything `IndexBuilder::finish` synthesized (a replacement
+    // root, the folder that collects orphans), and the nodes lifted out above.
+    // Placing them is all the same job, so they are all one list.
+    let mut fresh: Vec<u32> = (0..n as u32).filter(|&id| !covered[id as usize]).collect();
+    if fresh.is_empty() {
+        return Some(kept);
+    }
+    fresh.par_sort_by_cached_key(|&id| order_key(index, key, id));
+
+    // Pass 3 - one binary search each. This is the only place keys are derived
+    // against the existing order, and it touches log n of its entries rather
+    // than all of them, which is the whole difference from a merge.
+    let at: Vec<usize> = fresh
+        .par_iter()
+        .map(|&id| {
+            let probe = order_key(index, key, id);
+            kept.partition_point(|&other| order_key(index, key, other) < probe)
+        })
+        .collect();
+
+    // Pass 4 - splice. `fresh` is sorted and `kept` is sorted, so the
+    // insertion points come out non-decreasing and this is a merge by
+    // position: no keys, no comparisons, one memmove's worth of work.
+    let mut out = Vec::with_capacity(kept.len() + fresh.len());
+    let mut next = 0;
+    for (position, &id) in kept.iter().enumerate() {
+        while next < fresh.len() && at[next] <= position {
+            out.push(fresh[next]);
+            next += 1;
+        }
+        out.push(id);
+    }
+    out.extend_from_slice(&fresh[next..]);
+
+    (out.len() == n).then_some(out)
+}
+
 /// The size a user expects to see beside a row: files show their own bytes,
 /// directories their subtree total.
 /// The index a hit belongs to, if that volume is still loaded and still has

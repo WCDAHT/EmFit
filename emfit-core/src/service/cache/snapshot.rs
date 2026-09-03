@@ -25,7 +25,7 @@ use crate::service::cache::manifest::Manifest;
 use crate::service::fold::CaseFold;
 use crate::service::scan::FREE_SPACE_FS_ID;
 use crate::service::task::CancellationToken;
-use crate::service::view::SortKey;
+use crate::service::view::{self, SortKey};
 
 /// On-disk section numbers. Never renumber one; retire it and take a new
 /// number instead.
@@ -560,22 +560,28 @@ pub struct RebuildStats {
 /// link and rollup passes. Nothing about index construction is duplicated
 /// here, which is why a loaded index cannot disagree with a scanned one about
 /// orphan collection or subtree totals.
+///
+/// The fourth return is a [`Remap`]: where every node of the snapshot ended
+/// up, so the sort orders the snapshot carried can be repaired rather than
+/// thrown away ([`crate::service::view::repair_order`]).
 pub fn rebuild(
     columns: &Columns,
     caps: VolumeCaps,
     patch: &Patch,
     cancel: &CancellationToken,
-) -> Result<(Index, Vec<ScanWarning>, RebuildStats)> {
+) -> Result<(Index, Vec<ScanWarning>, RebuildStats, Vec<u32>)> {
     let n = columns.len();
     let mut builder = IndexBuilder::new(caps, cancel.clone());
     builder.reserve(n + patch.entries.len());
 
     let mut stats = RebuildStats::default();
     let mut batch: Vec<RawEntry<'_>> = Vec::with_capacity(REBUILD_BATCH);
+    let mut remap: Vec<u32> = Vec::with_capacity(n);
 
     for i in 0..n {
         let fs_id = columns.fs_ids[i];
         if patch.replace.contains(&(fs_id & FS_OBJECT_MASK)) {
+            remap.push(view::REMOVED);
             stats.dropped += 1;
             continue;
         }
@@ -594,6 +600,9 @@ pub fn rebuild(
             columns.allocated[i]
         };
 
+        // Ids are handed out in push order, so this entry's is however many
+        // are already in the builder plus however many are waiting in `batch`.
+        remap.push((builder.len() + batch.len()) as u32);
         batch.push(RawEntry {
             fs_id,
             parent_id,
@@ -628,7 +637,138 @@ pub fn rebuild(
     }
 
     let (index, warnings) = builder.finish();
-    Ok((index, warnings, stats))
+    Ok((index, warnings, stats, remap))
+}
+
+/// What a patch did to the paths of the nodes it did *not* touch.
+///
+/// The thing [`crate::service::view::repair_order`] cannot work out for
+/// itself. A node's name, size and times are its own, and a patch replaces
+/// every node it touches, so those columns only ever need the touched nodes.
+/// A path is not: it is assembled from ancestors, so renaming or moving a
+/// directory moves every descendant with it, and the journal emits nothing at
+/// all for those descendants (see the [`crate::service::replay`] module docs).
+#[derive(Debug, Default)]
+pub struct PathDamage {
+    /// Directories that came back renamed, came back somewhere else, or did
+    /// not come back at all.
+    pub moved: u64,
+    /// The surviving nodes underneath them, by their id in the *snapshot*.
+    /// These keep their id and their name and every other column, and only
+    /// their path changed - so the Path order can still be repaired, as long
+    /// as these are lifted out of it and placed again.
+    pub stranded: Vec<u32>,
+    /// A few of the directories by name, for a diagnostic to print.
+    pub sample: Vec<String>,
+}
+
+/// How many of a snapshot's nodes may be re-placed before repairing the Path
+/// order stops being worth it.
+///
+/// Re-placing costs a binary search each, and a binary search derives a key
+/// per probe; a rebuild derives one key per node and sorts. So the crossover
+/// is not far from `log n` times fewer nodes, and a quarter is a cautious
+/// place to stop and let the rebuild have it.
+const MAX_STRANDED_SHARE: usize = 4;
+
+/// Work out which surviving nodes a patch moved without saying so.
+///
+/// Two passes and no key derivation, so it is cheap enough to run on every
+/// cached load. The common case exits after the first: a directory is touched
+/// every time a child is added to it, and one that comes back with the same
+/// name under the same parent has not moved anything.
+pub fn path_damage(columns: &Columns, patch: &Patch) -> PathDamage {
+    let mut damage = PathDamage::default();
+    if patch.replace.is_empty() {
+        return damage;
+    }
+    let n = columns.len();
+    let fresh: HashMap<u64, &RecordedEntry> = patch.entries.iter().map(|e| (e.fs_id, e)).collect();
+
+    // Pass 1 - the directories that moved. A deletion counts: whatever lived
+    // under it can no longer reach the root, so the rebuild re-files it under
+    // the orphan folder, which changes its path as surely as a rename would.
+    const UNKNOWN: u8 = 0;
+    const CLEAN: u8 = 1;
+    const MOVED: u8 = 2;
+    let mut state = vec![UNKNOWN; n];
+    for (i, slot) in state.iter_mut().enumerate() {
+        // Flags first: most nodes are files, and a bit test is a great deal
+        // cheaper than a hash lookup done three million times.
+        if !EntryFlags::from_bits(columns.flags[i]).is_directory() {
+            continue;
+        }
+        let fs_id = columns.fs_ids[i];
+        if !patch.replace.contains(&(fs_id & FS_OBJECT_MASK)) {
+            continue;
+        }
+        let parent_fs = columns.fs_ids[columns.parents[i] as usize];
+        let stayed = fresh
+            .get(&fs_id)
+            .is_some_and(|e| e.name == columns.name(i) && e.parent_id == parent_fs);
+        if stayed {
+            continue;
+        }
+        *slot = MOVED;
+        damage.moved += 1;
+        if damage.sample.len() < 8 {
+            damage.sample.push(columns.name(i).to_string());
+        }
+    }
+    if damage.moved == 0 {
+        return damage;
+    }
+
+    // Pass 2 - who lived under one. Walking up from every node would be
+    // O(nodes * depth); resolving the whole chain at once and writing the
+    // answer back to all of it makes the second visit free, so this stays
+    // linear. A parent that points at itself is the root, and a parent chain
+    // that closes on itself is a cycle the builder will collect as orphans -
+    // both stop the walk.
+    let mut chain: Vec<usize> = Vec::new();
+    for start in 0..n {
+        if state[start] != UNKNOWN {
+            continue;
+        }
+        chain.clear();
+        let mut at = start;
+        let verdict = loop {
+            if state[at] != UNKNOWN {
+                break state[at];
+            }
+            state[at] = CLEAN; // provisional, so a cycle terminates
+            chain.push(at);
+            let parent = columns.parents[at] as usize;
+            if parent == at || parent >= n {
+                break CLEAN;
+            }
+            at = parent;
+        };
+        for &node in &chain {
+            state[node] = verdict;
+        }
+    }
+
+    // A node the patch replaced is not stranded - it is being placed again
+    // anyway, by the entry that came back in its stead.
+    damage.stranded = (0..n)
+        .filter(|&i| {
+            state[i] == MOVED
+                && !patch
+                    .replace
+                    .contains(&(columns.fs_ids[i] & FS_OBJECT_MASK))
+        })
+        .map(|i| i as u32)
+        .collect();
+    damage
+}
+
+impl PathDamage {
+    /// Whether the Path order can be repaired at all, and cheaply enough to be
+    /// worth it. `nodes` is the size of the snapshot.
+    pub fn repairable(&self, nodes: usize) -> bool {
+        self.stranded.len() <= nodes / MAX_STRANDED_SHARE
+    }
 }
 
 /// Node ids whose object number is in `records`, for a caller that has to

@@ -280,30 +280,47 @@ fn scan_and_save(
         "background: snapshot written"
     );
 
-    // The replay renumbered nodes, so whatever orders the old snapshot carried
-    // no longer address the right rows and had to go. Build them again here
-    // rather than leaving the app to do it: this is unattended time, and it is
-    // the whole point of scanning ahead that opening the window costs nothing.
-    append_orders(&manifest.volume, &outcome.index);
+    // The snapshot was just rewritten, so it carries no orders at all yet.
+    // Whatever the load repaired onto the rebuilt index goes straight back in;
+    // anything it could not repair is built here rather than left to the app,
+    // because this is unattended time and it is the whole point of scanning
+    // ahead that opening the window costs nothing.
+    let repaired = match outcome.source {
+        scan::OutcomeSource::Cached { orders, .. } => orders,
+        scan::OutcomeSource::Scanned => Default::default(),
+    };
+    append_orders(&manifest.volume, &outcome.index, repaired);
     Ok(Outcome::Written)
 }
 
-/// Rebuild and store the sort columns worth caching. Best-effort: a snapshot
-/// without them is merely slower to open, so nothing here is worth failing a
-/// run over.
-fn append_orders(stamp: &cache::VolumeStamp, index: &crate::model::index::Index) {
+/// Store the sort columns worth caching, building the ones `repaired` did not
+/// bring. Best-effort: a snapshot without them is merely slower to open, so
+/// nothing here is worth failing a run over.
+fn append_orders(
+    stamp: &cache::VolumeStamp,
+    index: &crate::model::index::Index,
+    mut repaired: std::collections::HashMap<view::SortKey, Vec<u32>>,
+) {
     let started = std::time::Instant::now();
+    let built = cache::CACHED_ORDERS
+        .iter()
+        .filter(|key| !repaired.contains_key(key))
+        .count();
     let orders: Vec<(view::SortKey, Vec<u32>)> = cache::CACHED_ORDERS
         .iter()
-        .map(|&key| (key, view::build_order(index, key)))
+        .map(|&key| match repaired.remove(&key) {
+            Some(order) => (key, order),
+            None => (key, view::build_order(index, key)),
+        })
         .collect();
 
     match cache::append_orders(stamp, index.len(), &orders) {
         Ok(0) => {}
         Ok(added) => tracing::info!(
             added,
+            built,
             elapsed_ms = started.elapsed().as_millis() as u64,
-            "background: sort orders rebuilt and stored"
+            "background: sort orders stored"
         ),
         Err(e) => tracing::warn!(error = %e, "background: could not store the sort orders"),
     }

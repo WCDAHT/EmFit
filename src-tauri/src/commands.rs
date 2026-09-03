@@ -263,23 +263,11 @@ fn install_cached_orders(app: &AppHandle, epoch: u64) {
         let Some((key, orders)) = inner.cached_orders.take() else {
             return;
         };
-
-        // A stored order lists node ids, and a replay that added or dropped
-        // anything renumbers them - so an order from a snapshot that was
-        // patched on the way in points at the wrong rows, and sorting by it
-        // would index past the end of the index. Repairing one (binary-search
-        // the new nodes in, splice the dropped ones out) is the eventual
-        // answer; until then a changed volume warms from scratch.
-        let usable = inner
-            .volumes
-            .iter()
-            .find(|v| v.key == key)
-            .and_then(|v| v.cacheable.as_ref())
-            .is_some_and(|meta| meta.unchanged);
-        if !usable {
-            tracing::debug!(key = %key, "cache: the snapshot was patched; warming its orders");
-            return;
-        }
+        // A stored order lists node ids and a replay renumbers them, so what
+        // arrives here has already been translated onto the rebuilt index and
+        // had the new nodes spliced in ([`emfit_core::service::view::
+        // repair_order`]). A column that could not be repaired never made it
+        // this far; the length check below is the backstop.
         (key, orders)
     };
 
