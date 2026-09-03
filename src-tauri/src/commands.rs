@@ -795,6 +795,24 @@ pub fn edit_filters(app: AppHandle) -> CommandResult<String> {
     Ok(path.display().to_string())
 }
 
+/// Open the folder EmFit writes its logs to.
+///
+/// The path comes from the same place the logger gets it, never from the
+/// webview, so no page can talk the file manager into opening somewhere else.
+/// The directory is created if the logger has not written yet, because opening
+/// a folder that does not exist reads as a broken button rather than as an
+/// empty log.
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> CommandResult<String> {
+    let dir = emfit_core::service::logging::log_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| CommandError::Shell(format!("could not create {}: {e}", dir.display())))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| CommandError::Shell(format!("could not open {}: {e}", dir.display())))?;
+    Ok(dir.display().to_string())
+}
+
 /// Bring the scheduled background-scan task in line with the saved config:
 /// registered when the feature is on with drives chosen, gone otherwise.
 ///

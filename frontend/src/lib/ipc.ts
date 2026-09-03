@@ -121,6 +121,11 @@ export function editFilters(): Promise<string> {
   return invoke("edit_filters");
 }
 
+/** Open the log folder in the file manager. Resolves with the path opened. */
+export function openLogFolder(): Promise<string> {
+  return invoke("open_log_folder");
+}
+
 /** Register or remove the scheduled background-scan task, to match the saved
  *  config. Prompts for Administrator; resolves to whether it is registered
  *  afterwards. */

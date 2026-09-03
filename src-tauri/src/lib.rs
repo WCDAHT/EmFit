@@ -142,6 +142,7 @@ pub fn run() {
             commands::list_presets,
             commands::search_syntax,
             commands::edit_filters,
+            commands::open_log_folder,
             commands::check_for_update,
             commands::download_update,
             commands::cancel_update_download,

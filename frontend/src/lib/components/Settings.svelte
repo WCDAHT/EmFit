@@ -24,6 +24,7 @@
     backgroundStatus,
     runBackgroundNow,
     syncBackgroundTask,
+    openLogFolder,
   } from "../ipc";
   import { session, queryChanged } from "../session.svelte";
   import { SIZE_UNITS, type SizeUnit } from "../format";
@@ -81,6 +82,10 @@
   let cacheCount = $state(0);
   let clearing = $state(false);
   let cleared = $state("");
+  // Opening the log folder is an action, not a setting, so it happens on the
+  // click rather than on Save. Only a failure is worth showing: on success the
+  // file manager is already in front of the user saying so.
+  let logsError = $state("");
 
   // Re-seed from the live session every time the dialog opens.
   $effect(() => {
@@ -103,9 +108,19 @@
       ranNow = "";
       void refreshBackgroundStatus();
       cleared = "";
+      logsError = "";
       void refreshCacheUsage();
     }
   });
+
+  async function onOpenLogs() {
+    logsError = "";
+    try {
+      await openLogFolder();
+    } catch (e) {
+      logsError = `Could not open the log folder: ${e}`;
+    }
+  }
 
   async function refreshCacheUsage() {
     const usage = await cacheUsage();
@@ -291,6 +306,20 @@
             </div>
             {#if cleared}
               <p class="hint">{cleared}</p>
+            {/if}
+
+            <div class="row">
+              <button class="btn" onclick={() => void onOpenLogs()}>
+                Open log folder
+              </button>
+            </div>
+            <p class="hint">
+              What EmFit recorded about scans, updates and errors. The place to
+              look when something went wrong, and what to attach to a bug
+              report.
+            </p>
+            {#if logsError}
+              <p class="hint warn">{logsError}</p>
             {/if}
           {:else if tab === "background"}
             <label class="toggle">
@@ -588,6 +617,11 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
+  }
+  /* The text beside a button is what gives; a button squeezed narrower than
+     its label wraps inside a fixed height and spills out of its own box. */
+  .row .btn {
+    flex: none;
   }
   .btn:disabled {
     opacity: 0.5;
