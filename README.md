@@ -5,9 +5,29 @@ directly instead of walking directories, so indexing a whole drive takes seconds
 type to find any file by name, or view what is actually consuming the disk.
 A reimplementation of the ground covered by WizTree and Everything.
 
-## Screenshot
+## Screenshots
 
-<!-- Drop a screenshot or animated GIF of the current UI here. -->
+Search across a scanned volume: 3.5M objects indexed, results in 294 ms.
+
+![EmFit List tab, showing folders sorted by size with the search bar above and
+the object count and indexed total in the status bar](docs/images/search-list.png)
+
+Tree view: a folder tree with proportional bars and percent-of-parent above the
+squarified treemap, with free space drawn as a block so the map accounts for the
+whole volume.
+
+![EmFit Tree view, folder tree over a colored treemap with a file-type
+legend](docs/images/treemap.png)
+
+Advanced search: a form over the query language, with the syntax it writes shown
+at the bottom of the dialog.
+
+![EmFit Advanced search dialog, with name, folder and date fields](docs/images/advanced-search.png)
+
+Scanning reads the MFT directly, with live progress and a working Cancel.
+
+![EmFit scanning drive C:, progress bar reading the MFT at 1,070,896 of
+3,602,688 records](docs/images/scan-progress.png)
 
 ## Install / run
 
